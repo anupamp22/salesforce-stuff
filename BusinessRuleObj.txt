@@ -1,0 +1,355 @@
+/*****************************
+Author: Anupam Priyadarshi
+Title: BusinessRuleObject
+Description:Rule class for configurator. This comprises the business/validation rules for packages/products
+Ref#: 
+Open Issues (remove when resolved): N/A
+Usage:
+See test Method.
+API Version: 26.0
+11.10.2012 Created the first verion
+11.11.2012 Added the exclusion/Re-reg Ids to be returned
+11.12.2012 Added asset check logic
+12.11.2012 Fixed the UAT issue for quantity validation
+12.20.2012 fix to allow inconsistent country code across tables
+01.08.2013 Added the test method
+01.10.2013 Adding interfce getQuantityListByProdRelORUOM/getActualQtyByLicenseUnit by Chia
+01.15.2013 Adding biz rules for getQuantityListByProdRelORUOM
+*********************************/
+public with sharing class BusinessRuleObj extends CommonObj implements CommonObj.IProductBusinessRules{
+private map<string, ProductMatrixObject> productMap;
+private string accountID;
+private map<string, map<string,Asset>> assetMap;
+
+public BusinessRuleObj(){}
+public BusinessRuleObj(map<string,ProductMatrixObject> pMatrix){
+  this.productMap = pMatrix;
+}
+public BusinessRuleObj(map<string,ProductMatrixObject> pMatrix, string pAccountID){
+  this.productMap = pMatrix;
+  this.accountID = pAccountID;
+  buildAssetMapForAccount();
+}
+
+@isTest(SeeAllData=true)
+static void test(){
+  // Initializing the CommonObj constructors
+  List<Opportunity> opps=[Select o.AccountId,o.Account.Name,o.Billing_Country__c, o.Number_of_Users__c, o.Name,o.PriceBook2Id, o.Id, o.Contract_Term__c From Opportunity o limit 1];
+  CommonObj.ProductConfiguratorObj pConfig=new CommonObj.ProductConfiguratorObj(opps[0].Id);
+  list<map<string,ProductMatrixObject>> a1=pConfig.productMatrix.values();
+    list<ProductMatrixObject> a2=a1[0].values();
+    
+    Asset asst = new Asset(name='test-asset', AccountId=opps[0].AccountId, status__c='Installed', Product2Id=a2[0].sfdcId);
+    insert asst;
+    
+    // Instantiating the businessRuleObj constructors  
+  BusinessRuleObj bizRuleObjDef = new BusinessRuleObj();
+  BusinessRuleObj bizRuleObj = new BusinessRuleObj(pConfig.productMap);
+  BusinessRuleObj bizRuleObj1 = new BusinessRuleObj(pConfig.productMap, opps[0].AccountId);
+  //BusinessRuleObj bizRuleObj2 = new BusinessRuleObj(null);
+      
+  //initializing the raw data
+  string productId = a2[0].sfdcId;
+  integer numUsers =3;
+  string oppLicenseUnit = 'User';
+  string OppbillingCountry ='USA';
+  string OppbillingCountryCanada ='CAN';
+  string OppbillingCountryEurope ='Europe';
+  
+  integer contractTerm = 12;
+  integer recommendedQty = 6;
+  integer maxQty = 20;
+  integer minQty = 3; 
+  integer newQty = 5;
+  string packageType = 'AddOn';  
+  CommonObj.QuantityType packageQtyList = new CommonObj.QuantityType(recommendedQty, maxQty,minQty,oppLicenseUnit);
+  
+  //executing the tests
+  bizRuleObj.isPackageForSelectedNumUsers(productId, numUsers);
+  bizRuleObj.isValidLicenseUnit(productId,oppLicenseUnit);
+  actualCountryCode(OppbillingCountry);
+  actualCountryCode(OppbillingCountryCanada);
+  actualCountryCode(OppbillingCountryEurope);
+  bizRuleObj.isPackageForSelectedContractTerms(productId,contractTerm);
+  bizRuleObj.isProductWithinValidLicenseQty(productId, numUsers);
+  bizRuleObj.isProductWithinValidQuantityRangeinProdRelationShip(recommendedQty,maxQty, minQty, packageType, newQty);
+  bizRuleObj.getActualRecommendedQty(recommendedQty,maxQty, minQty, packageType, newQty);
+  bizRuleObj.buildAssetMapForAccount();
+  bizRuleObj.isAnAssetOnAccount(productId);
+  bizRuleObj.getActualQtyByLicenseUnit(oppLicenseUnit, oppLicenseUnit,minQty, minQty);
+  bizRuleObj.getActualQtyByLicenseUnit(oppLicenseUnit, oppLicenseUnit,null, null);
+  bizRuleObj.getQuantityListByProdRelORUOM(maxQty, minQty, minQty,oppLicenseUnit, productId, packageQtyList);
+  bizRuleObj.getQuantityListByProdRelORUOM(maxQty, minQty, minQty,oppLicenseUnit, productId);
+  try{
+    bizRuleObj.getQuantityListByProdRelORUOM(null, null, null,oppLicenseUnit, productId);
+    bizRuleObj.getQuantityListByProdRelORUOM(null, null, null,oppLicenseUnit, productId, packageQtyList);
+    
+  }
+  catch(CommonException ex){
+    //system.debug(logginglevel.WARN,ex);
+    //return;
+  }
+  try{
+    bizRuleObj.getQuantityListByProdRelORUOM(null, null, null,oppLicenseUnit, productId, packageQtyList);
+  }
+  catch(CommonException ex){
+    //system.debug(logginglevel.WARN,ex);
+    //return;
+  }  
+  //productMap.put()
+  //return;
+  /*bizRuleObj2.isPackageForSelectedNumUsers(productId, numUsers);
+  bizRuleObj2.isValidLicenseUnit(productId,oppLicenseUnit);
+  bizRuleObj2.isPackageForSelectedContractTerms(productId,contractTerm);
+  bizRuleObj2.isProductWithinValidLicenseQty(productId, numUsers);*/
+}
+
+/* determines if packages to be sold only for min and max user licenses */
+public boolean isPackageForSelectedNumUsers(/*map<string,ProductMatrixObject> productMap,*/ string productId, integer numUsers){
+  boolean retVal = true;
+  try{
+    ProductMatrixObject pmo = productMap.get(productId);    
+    if (pmo==null)
+      throw new CommonException('No valid UOM found',CommonExceptionType.UOMValidationError);
+    if (pmo.isPackage){
+      if (pmo.licenseUnitList!=null && pmo.licenseUnitList.contains('User')){
+        if(pmo.quantityList.minQty !=null || pmo.quantityList.maxQty !=null){
+          if (numUsers <pmo.quantityList.minQty || numUsers > pmo.quantityList.maxQty){
+            retVal = false;
+          }          
+        }
+      }
+    }
+    return retVal;      
+  }
+  catch(CommonException cEx){
+    //cEx.notifyViaEmail(CommonObj.developerEmails);
+    return retVal;
+  }
+  
+}
+/* determines if packages based on the opportunity license unit*/
+public boolean isValidLicenseUnit(string product2Id, string oppLicenseUnit)
+{
+  boolean retVal = false;
+  try{
+    ProductMatrixObject pmo = productMap.get(product2Id);    
+    if (pmo==null)
+      throw new CommonException('No valid UOM found',CommonExceptionType.UOMValidationError);
+    if (pmo.isPackage){
+      if (pmo.licenseUnitList!=null && pmo.licenseUnitList.contains(oppLicenseUnit)){
+        retVal = true;
+      }
+    }
+    return retVal;
+  }
+  catch(CommonException cEx){
+    //cEx.notifyViaEmail(CommonObj.developerEmails);
+    return retVal;
+  }
+}
+/* fix to allow inconsistent country code across tables */
+public static string actualCountryCode(string OppbillingCountry){
+  string billingCountry;
+  if (OppbillingCountry =='US' ||  OppbillingCountry =='USA'){
+    billingCountry = 'USA';
+  }
+  else if (OppbillingCountry =='CAN' ||  OppbillingCountry =='CA' || OppbillingCountry =='Canada')
+  {
+    billingCountry = 'Canada';
+  }
+  else {
+    billingCountry = 'International';
+  } 
+  return billingCountry;
+}
+/* check packages to be sold only for min and max contract terms */
+public boolean isPackageForSelectedContractTerms(/*map<string,ProductMatrixObject> productMap,*/ string productId,integer contractTerm){
+  boolean retVal = true;
+  try{
+    ProductMatrixObject pmo = productMap.get(productId);
+    if (pmo==null)
+      throw new CommonException('No valid UOM found',CommonExceptionType.UOMValidationError);
+    if (pmo.isPackage){
+        if (pmo.termUnit!=null && pmo.termUnit=='Month'){
+          if (pmo.termUnitMin!=null || pmo.termUnitMax !=null){
+            if (contractTerm  < pmo.termUnitMin || contractTerm > pmo.termUnitMax){
+              retVal = false;
+            }            
+          }  
+        }
+    }
+    return retVal;      
+  }
+  catch(CommonException cEx){
+    //cEx.notifyViaEmail(CommonObj.developerEmails);
+    return retVal;  
+  }  
+}
+/* determines if the product to be sold within valid license quantity based on prod UOM table */
+public boolean isProductWithinValidLicenseQty(string productId, integer numUsers){
+  boolean retVal = true;
+  try{
+    ProductMatrixObject pmo = productMap.get(productId);    
+    if (pmo==null)
+      throw new CommonException('No valid UOM found',CommonExceptionType.UOMValidationError);
+      if(pmo.quantityList.minQty !=null || pmo.quantityList.maxQty !=null){
+          if (numUsers <pmo.quantityList.minQty || numUsers > pmo.quantityList.maxQty){
+            retVal = false;
+          }          
+        }
+      return retVal;      
+  }
+  catch(CommonException cEx){
+    //cEx.notifyViaEmail(CommonObj.developerEmails);
+    return retVal;
+  }  
+}
+/* determines if the product to be sold within valid license quantity based on prod rel table */
+public boolean isProductWithinValidQuantityRangeinProdRelationShip(integer recommendedQty,integer maxQty, integer minQty, string packageType, integer newQty)
+{ 
+  boolean retVal=true;
+  if (packageType =='AddOn' || packageType =='Pre-Req'){
+    if (recommendedQty>1 && maxQty>1 && minQty>1) {
+      if (newQty < minQty || newQty > maxQty){
+        retVal=false;
+      }
+    }
+  }
+  return retVal;
+}
+
+
+/* determines if there are any recommended quantity on the pre-reqs or AddOns */
+public integer getActualRecommendedQty(integer recommendedQty,integer maxQty, integer minQty, string packageType, integer newQty)
+{
+  integer qty = newQty;
+  if (packageType =='AddOn' || packageType =='Pre-Req'){
+    if (recommendedQty>1 && maxQty>1 && minQty>1) {
+      if (newQty < minQty || newQty > maxQty){
+        qty=recommendedQty;
+      }
+    }
+  }
+  return qty;    
+}
+
+ /* building the map of installed assets on the account */
+ private void buildAssetMapForAccount(){
+      assetMap = new map<string, map<string,Asset>>();
+      for(Asset ast: [Select a.Id, a.UsageEndDate, a.Term__c, a.Status__c, a.Status, 
+              a.Start_Date__c, a.Renewal_Date__c, a.Product2Id, a.AccountId 
+              from Asset a
+              where a.AccountId=:accountID
+              /*and a.status__c='Installed'*/]){
+        if (!assetMap.containsKey(ast.Product2Id)){
+          assetMap.put(ast.Product2Id, new map<string,Asset>());
+        }
+          map<string,Asset> childAssetMap = assetMap.get(ast.Product2Id);
+        childAssetMap.put(ast.Id, ast);
+        assetMap.put(ast.Product2Id,childAssetMap);
+        
+      }      
+    }
+  
+    /* checks to see if productId is already an asset on the account */
+    public boolean isAnAssetOnAccount(string productId){
+      return assetMap.containsKey(productId);
+      //boolean retVal = false;
+      //try{
+    //    if (assetMap.containsKey(productId)){
+          //for(Asset a:assetMap.get(productId).values()){
+     //       retVal = true;      
+          //}      
+     //   }          
+      //}
+      //catch(CommonException cEx){
+        //cEx.notifyViaEmail(CommonObj.developerEmails);
+      //}
+      //return retVal;    
+    }//end of method
+  
+  /* 
+   * depleted, unprofessional design.
+   */
+  public integer getActualQtyByLicenseUnit(string productLicenseUnit, string OpportunityLicenseUnit, 
+                        integer productMinQty, integer opportunityNumberUsers){
+    if (productLicenseUnit==OpportunityLicenseUnit){
+      if (productMinQty==null){
+        return opportunityNumberUsers;
+      }
+      else{
+        return productMinQty;
+      }
+    }
+    else {
+      if (productMinQty==null){
+        return 1;
+      }
+      else{
+        return productMinQty;
+      }
+    }
+  }
+  /* 
+   * Get QuantityType by examining the Product Relationship and Product UOM. If Product Relationship has no 
+   * Qty info, then go check Product UOM
+   */
+  public QuantityType getQuantityListByProdRelORUOM(integer relMaxQty, integer relMinQty, integer relRecommendedQty, 
+                          string relLicenseUnit, string productId, QuantityType packageQtyList){
+    if (relMaxQty==null||relMinQty==null){
+      if (productMap.containsKey(productId)){
+        ProductMatrixObject pmoa=new ProductMatrixObject(productMap.get(productId));
+        if (pmoa.quantityList.maxQty==null||
+          pmoa.quantityList.minQty==null){
+          throw new CommonException('No available quantities information for product code: ' + pmoa.productCode + '. Please contact PM for the details.',CommonExceptionType.NoAvailableQuantities);
+        }
+        else{
+          return new QuantityType(pmoa.quantityList);
+        }
+      }
+      else
+        throw new CommonException('No available quantities information. Please contact PM for the details.',CommonExceptionType.NoAvailableQuantities);
+    }
+    else {
+      return new QuantityType(relRecommendedQty==null?relMinQty:relRecommendedQty,
+                  relMaxQty,
+                  relMinQty,
+                  relLicenseUnit);          
+    }
+    
+    
+  }
+  
+  /* 
+   * Get QuantityType by examining the Product Relationship and Product UOM. If Product Relationship has no 
+   * Qty info, then go check Product UOM
+   */
+   
+  public QuantityType getQuantityListByProdRelORUOM(integer relMaxQty, integer relMinQty, integer relRecommendedQty, 
+                          string relLicenseUnit, string productId){
+    if (relMaxQty==null||relMinQty==null){
+      if (productMap.containsKey(productId)){
+        ProductMatrixObject pmoa=new ProductMatrixObject(productMap.get(productId));
+        if (pmoa.quantityList.maxQty==null||
+          pmoa.quantityList.minQty==null){
+          throw new CommonException('No available quantities information for product code: ' + pmoa.productCode + '. Please contact PM for the details.',CommonExceptionType.NoAvailableQuantities);
+        }
+        else{
+          return new QuantityType(pmoa.quantityList);
+        }
+      }
+      else
+        throw new CommonException('No available quantities information. Please contact PM for the details.',CommonExceptionType.NoAvailableQuantities);
+    }
+    else {
+      return new QuantityType(relRecommendedQty==null?relMinQty:relRecommendedQty,
+                  relMaxQty,
+                  relMinQty,
+                  relLicenseUnit);          
+    }
+    
+    
+  }
+    
+} //end of class

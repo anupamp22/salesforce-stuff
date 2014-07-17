@@ -1,0 +1,118 @@
+/*****************************
+Author: Anupam Priyadarshi
+Title: Trigger for auditing product2 fields
+Description:Trigger for auditing product2 fields 
+Ref#: 
+Open Issues (remove when resolved): N/A
+See test Method.
+Revision History: 
+02/14/2013 - Created
+03/14/2013 - Changed to audit all the custom fields of Product2
+04/23/2013 - Changed to separate the schema related logic from trigger loop
+*********************************/
+trigger Product2Audit on Product2 (after insert, after update) {  
+  list<m_Product_History__c> prodHistList = new list<m_Product_History__c>();
+  
+  Product2 ProdObj = new Product2(); //getting all the fields from the product2
+  Schema.Sobjecttype objType = ProdObj.getSObjectType();
+  map<string, Schema.Sobjectfield> mField = Schema.Sobjecttype.Product2.fields.getMap();
+  map<string, string> productFieldMap = new map<string, string>();
+  for(string str:mField.keySet()){
+       Schema.DescribeFieldResult mFieldDetails = mField.get(str).getDescribe();
+       if (mFieldDetails.isCustom()){
+         productFieldMap.put(str,mFieldDetails.getLabel());
+       }
+   }                    
+    for(Product2 prod:Trigger.new){
+            if (trigger.isInsert){  
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.id;
+                    mph.Action__c='Created';
+                    prodHistList.add(mph);
+            }                   
+            else if (trigger.isUpdate){
+                // we only care here for the changed fields
+                Product2 oldProd = trigger.oldMap.get(prod.id);
+                //for(string str:mField.keySet()){
+                   // Schema.DescribeFieldResult mFieldDetails = mField.get(str).getDescribe();
+                    //if (mFieldDetails.isCreateable()&& /*!mFieldDetails.isNillable() &&*/ !mFieldDetails.isDefaultedOnCreate()){
+                    //if (mFieldDetails.isCustom()){
+                      for(string str:productFieldMap.keySet()){
+                          if (prod.get(str) !=oldProd.get(str)){
+                                     // string label = mFieldDetails.getLabel();
+                                      m_Product_History__c mph = new m_Product_History__c();
+                                      mph.Product__c = prod.Id;
+                                      mph.Action__c = 'Changed field '+productFieldMap.get(str)+' from '+oldProd.get(str)+' to '+ prod.get(str);
+                                      prodHistList.add(mph);                          
+                              }
+                      }                                  
+                /*
+                //adding history tracking for Name
+                if (prod.Name != oldProd.Name){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed Product Name from '+oldProd.Name+' to '+ prod.Name;
+                    prodHistList.add(mph);
+                }
+                //adding history tracking for (m) Product Code
+                if (prod.Product_Code__c != oldProd.Product_Code__c){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed (m) Product Code from '+oldProd.Product_Code__c+' to '+ prod.Product_Code__c;
+                    prodHistList.add(mph);
+                }
+                //adding history tracking for IsActive
+                if (prod.IsActive != oldProd.IsActive){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed Active Status from '+oldProd.IsActive+' to '+ prod.IsActive;
+                    prodHistList.add(mph);
+                }
+                
+                //adding history tracking for (m) Product Type
+                if (prod.m_Product_Type__c != oldProd.m_Product_Type__c){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed (m) Product Type from '+oldProd.m_Product_Type__c+' to '+ prod.m_Product_Type__c;
+                    prodHistList.add(mph);
+                }
+                //adding history tracking for Is Package
+                if (prod.Is_Package__c != oldProd.Is_Package__c){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed Is Package from '+oldProd.Is_Package__c+' to '+ prod.Is_Package__c;
+                    prodHistList.add(mph);
+                }
+                //adding history tracking for (m) Package Type
+                if (prod.m_Package_Type__c != oldProd.m_Package_Type__c){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed (m) Package Type from '+oldProd.m_Package_Type__c+' to '+ prod.m_Package_Type__c;
+                    prodHistList.add(mph);
+                }
+                //adding history tracking for Package Classification
+                if (prod.Package_Classification__c != oldProd.Package_Classification__c){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed Package Classification from '+oldProd.Package_Classification__c+' to '+ prod.Package_Classification__c;
+                    prodHistList.add(mph);
+                }
+                //adding history tracking for m Package display order
+                if (prod.m_Package_display_order__c != oldProd.m_Package_display_order__c){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed m Package display order from '+oldProd.m_Package_display_order__c+' to '+ prod.m_Package_display_order__c;
+                    prodHistList.add(mph);
+                }
+                //adding history tracking for Can be Sold
+                if (prod.Can_be_Sold__c != oldProd.Can_be_Sold__c){
+                    m_Product_History__c mph = new m_Product_History__c();
+                    mph.Product__c = prod.Id;
+                    mph.Action__c = 'Changed Package Classification from '+oldProd.Can_be_Sold__c+' to '+ prod.Can_be_Sold__c;
+                    prodHistList.add(mph);
+                }*/                 
+        }       
+    }//end of for loop
+    if (prodHistList!=null && prodHistList.size()>0)
+        insert prodHistList;
+}//end of trigger class

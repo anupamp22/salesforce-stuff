@@ -1,0 +1,344 @@
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+165
+166
+167
+168
+169
+170
+171
+172
+/*
+ * Author: Venkata Kunisetty
+ * Developer: Venkata Kunisetty
+ * Title: Opportunity Pricing Configurator Extension
+ * Description: This class receives the Opportunity Data from the Pricing Configurator
+ * Ref: Order to Cash Project - Opportunity Management
+ * Open Issues (remove when resolved): N/A   
+ * Usage: Called by the Pricing Configurator
+ * API Version: SFDC v25.0
+ * Licensing: Mitchell International.
+ * Revisions' History: 
+ * 12.11.2012 - Updated comments
+ * 12.13.2012 - Extended CommonObj and Implemented IOpportunityContent
+ * 12.17.2012 - Interface Signature Changed 
+ * 12.19.2012 - Updated multiplicaton code as Configurator's values changed.
+ * 12.20.2012 - Added a new field Payment_Upfront_Before_Financing__c on Opportunity Line Item. 
+ * 01.09.2013 - Distributed the pricing to the Items from the Package - Bundling Fields
+ * 01.10.2013 - Sorted the Packages and their Items
+ * 02.27.2013 - Added new field Payment_Type_from_Config__c and Unit_Price_before_Financing__c
+ */
+ 
+public class OppPricingConfiguratorExtn extends CommonObj implements IOpportunityContent {
+  
+  public OppPricingConfiguratorExtn(){
+    
+  }
+
+    public boolean generateOpportunityLineItems(Opportunity opp, list<OpportunityLineItem> oppLineItem){
+
+    /* Enhance the OpportunityLineItem */
+    
+    list<OpportunityLineItem> olis=new list<OpportunityLineItem>();
+
+    for (OpportunityLineItem ol : oppLineItem) {
+      
+      ol.Payment_Total_BD__c = ol.m_Unit_Price__c;      
+      ol.Payment_Upfront_Before_Financing__c = ol.m_Payment_Upfront__c;
+
+      if (ol.m_Unit_Price__c > 0.0)
+        ol.Payment_Type__c = ol.m_Payment_Upfront__c>0.0?'Upfront':'Recurring';
+        
+      ol.Payment_Type_from_Config__c = ol.Payment_Type__c;  
+      ol.Unit_Price_before_Financing__c = ol.m_Unit_Price__c;
+
+      // to Store the count of Child Items for each Package
+      Double ordSort = 0.0;
+        
+      // Find out the Bundling Prices 
+      if (ol.Parent_Product__c != null) {
+        Double packagePrice = 0.0;
+        Double totalPriceOfUnits = 0.0;
+        
+        for (OpportunityLineItem olC : oppLineItem) {
+
+          if (ol.Parent_Product__c == olC.Product_from_Config__c) {
+            packagePrice = olC.UnitPrice / olC.Quantity;    // After Promotions Discount Price           
+          }
+          
+          if (ol.Parent_Product__c == olC.Parent_Product__c) {
+            totalPriceOfUnits += olC.Item_Price__c;
+          }
+        }
+
+        totalPriceOfUnits = totalPriceOfUnits / ol.Quantity;
+
+        if (ol.Item_Price__c <> 0.0 && totalPriceOfUnits > 0.0)
+          ol.Bundling_Ratio__c = (ol.Item_Price__c / ol.Quantity) / totalPriceOfUnits;
+        else
+          ol.Bundling_Ratio__c = 0.0;        
+
+        if (packagePrice > 0.0) {
+          ol.Bundling_Price_before_Discount__c = packagePrice * ol.Bundling_Ratio__c;
+        }   
+      } else {
+        // Finding out the number of Child Items for Each Parent
+        ordSort = 0.9;  // All parent items will begin with an extra value 
+        for (OpportunityLineItem olC : oppLineItem) {
+          if (ol.Product_from_Config__c == olC.Parent_Product__c) 
+            ordSort += 1.0;
+        }
+      }
+      ol.Order_Sort__c = ordSort;
+    }
+
+    // Now set the parent's order to the Child items    
+    for (OpportunityLineItem ol : oppLineItem) {
+      
+      if (ol.Parent_Product__c != null) {
+        for (OpportunityLineItem olC : oppLineItem) {
+          if (ol.Parent_Product__c == olC.Product_from_Config__c) { 
+            ol.Order_Sort__c = olC.Order_Sort__c - 0.9;
+            break;
+          }
+        }
+      }
+      olis.add(ol);      
+    }  
+    
+    /* Setting Manual Discount, Financed, Downpayment fields on Opportunity to Null  */
+    
+    Opportunity  oUpd   = new Opportunity();
+    oUpd = [SELECT Discount_Manual__c, m_Financed__c, m_Down_Payment__c FROM Opportunity WHERE Id = :Opp.Id]; 
+
+    oUpd.Discount_Manual__c = null;
+    oUpd.m_Financed__c = False;
+    oUpd.m_Down_Payment__c = null;
+
+    /*  Save all the data    */
+    boolean isSaved = false;
+
+    try{    
+      update oUpd;
+      delete [select o.id from OpportunityLineItem o where o.OpportunityId=:Opp.Id];
+    }
+    catch (CommonException cEx){
+      cEx.notifyViaEmail(CommonObj.developerEmails);
+    }
+    
+    if (olis.size() > 0) {
+      try{
+        insert olis;
+        isSaved = true;
+      }
+      catch (CommonException cEx){
+        cEx.notifyViaEmail(CommonObj.developerEmails);
+      }
+    } else
+      isSaved = true;
+                 
+    /* Determine the Order Type */
+
+    OppLineItemOrderTypeCalc ordType = new OppLineItemOrderTypeCalc();
+    Boolean ordTypeSuccess = ordType.determineOrderType(Opp);                        
+
+      return isSaved;
+    }  
+    
+    public boolean generateOpportunityPromo(Opportunity opp,set<string> promoIds){
+
+    /*  Generate Opportunity Promotion Lines and Store them */
+    Opportunity_Promo__c[] opAdd = new Opportunity_Promo__c[]{};
+
+    for (String pId : promoIds) {
+      Opportunity_Promo__c op = new Opportunity_Promo__c(); 
+      op.Opportunity__c = opp.Id;
+      op.Promotion_Discount_Charge__c = pId;
+
+      opAdd.add(op);      
+    }
+
+    boolean isSaved = false;
+
+    try {
+      delete [select o.id from Opportunity_Promo__c o where o.Opportunity__c=:Opp.Id];
+    } catch (CommonException cEx){
+      cEx.notifyViaEmail(CommonObj.developerEmails);
+    }
+
+    if (opAdd.size() > 0) {
+      try{
+        insert opAdd;
+        isSaved = true;
+      }
+      catch (CommonException cEx){
+        cEx.notifyViaEmail(CommonObj.developerEmails);
+      }
+    } else 
+      isSaved = true;
+            
+      return isSaved;
+    }
+}

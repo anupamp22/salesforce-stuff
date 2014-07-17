@@ -1,0 +1,110 @@
+*****************************
+Author: Anupam Priyadarshi
+Title: Trigger for Product Price Schedule Object
+Description:Trigger to prevent creating more than one active price schedule per account per region per product in a given time period
+Ref#: 
+Open Issues (remove when resolved): N/A
+Usage:
+See test Method.
+11/12/2012: created
+01/13/2013: added some more checks, removed commonexception
+03/08/2013: Added the before delete logic
+03/12/2013: Added the license unit bypass as per Sarat's request
+03/15/2013: Removing the licenseUnit check as per discussion with Sarat & Chia
+05/04/2013: Fixing a prod issue to allow updates of max discount
+*********************************/
+trigger ProductPriceScheduleTrigger on m_Product_Price_Schedule__c (before insert, before update, before delete) {  
+  set<Id> productIds = new set<Id>();  
+  /* storing the Ids */
+  if (trigger.isInsert || trigger.isUpdate){
+    for(m_Product_Price_Schedule__c pps : trigger.new){
+      productIds.add(pps.Product__c);  
+    }    
+  }
+  else if (trigger.isDelete){
+    for(m_Product_Price_Schedule__c pps : trigger.old){
+      productIds.add(pps.Product__c);  
+    }  
+  }
+  
+  /* creating a map with all the active price schedules */
+  map<string, map<string, m_Product_Price_Schedule__c>> priceSchedules = new map<string, map<string, m_Product_Price_Schedule__c>>();
+  set<Id> allUOMIds = new set<Id>();
+  
+  for(m_Product_Price_Schedule__c ps:[SELECT Id, Product__c, Status__c, Start_Date__c, End_Date__c, Region__c, Account_ID__c, License_Unit__c 
+                    FROM m_Product_Price_Schedule__c
+                     WHERE product__c IN :productIds
+                     AND status__c='Active']){
+    if (!priceSchedules.containsKey(ps.Product__c)){
+       priceSchedules.put(ps.Product__c,new map<string, m_Product_Price_Schedule__c>());
+    }                       
+    map<string, m_Product_Price_Schedule__c> mp = priceSchedules.get(ps.Product__c);
+    mp.put(ps.Id,ps);
+    priceSchedules.put(ps.Product__c,mp);
+    allUOMIds.add(ps.id);                            
+  }  
+  
+  if(trigger.isInsert || trigger.isUpdate){
+    for(m_Product_Price_Schedule__c pps : trigger.new){
+      if (priceSchedules.containsKey(pps.Product__c)){
+          for(m_Product_Price_Schedule__c mp:priceSchedules.get(pps.product__c).values()){
+            //system.debug('Anupam is printing inside priceScheduleTrigger::'+pps.Status__c+':::'+mp.id+':::'+pps.id);
+            if (pps.Status__c=='Active' && mp.id != pps.id){
+              if(pps.Account_ID__c!=null && mp.Account_ID__c!=null){
+                if (mp.Start_Date__c <= pps.Start_Date__c && pps.Start_Date__c <= mp.End_Date__c){
+                  if (mp.Account_ID__c==pps.Account_ID__c){
+                    pps.addError('You can not have two active price schedule on the same account on a product.');
+                  }                  
+                }                  
+                
+              }
+              else if(pps.Account_ID__c==null && mp.Account_ID__c==null)
+              {
+                if (mp.Start_Date__c <= pps.Start_Date__c && pps.Start_Date__c <= mp.End_Date__c){
+                  if (mp.Region__c==pps.Region__c){
+                    pps.addError('You can not have two active price schedule per region on a product');              
+                  }            
+                }
+              
+              }
+              /*if (mp.Start_Date__c <= pps.Start_Date__c && pps.Start_Date__c <= mp.End_Date__c){
+                    if(pps.Account_ID__c!=null && mp.Account_ID__c==pps.Account_ID__c){                   
+                    pps.addError('You must not have two active price schedule on the same account on a product.');
+                    }
+                    else if (pps.Account_ID__c==null && mp.Region__c==pps.Region__c){
+                      pps.addError('You must not have two active price schedule per region on a product.');
+                    }                    
+              }*/            
+            }  
+          }      
+      }      
+    }    
+  }
+    /*else if (trigger.isUpdate){
+       for(m_Product_Price_Schedule__c pps : trigger.new){
+         m_Product_Price_Schedule__c oldPPS = trigger.oldMap.get(pps.id);
+         if (pps.status__c=='Active'){
+           if ((pps.Region__c == oldPPS.Region__c) || (pps.Account_ID__c == oldPPS.Account_ID__c)){
+             pps.addError('You can not have same region or account on two active price schedules');
+           }           
+         }
+       }
+     }*/
+  else if (trigger.isDelete){
+    list<Product2> prodlist = new list<product2>();
+      for(m_Product_Price_Schedule__c pps : trigger.old){
+          if (allUOMIds.size()==1){
+            product2 pr = new Product2(Id=pps.Product__c);
+            pr.isActive=false;
+            prodlist.add(pr);
+                  
+        
+      }
+    }
+    if (prodlist!=null && prodlist.size()>0){
+      update prodlist;
+    }    
+  }
+    
+
+}

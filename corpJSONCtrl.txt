@@ -1,0 +1,33 @@
+public without sharing class corpJSONCtrl extends CommonObj.CommonLib{
+  private PageReference page;
+  private string action;
+  private string session;
+  private string result;
+ 
+  public corpJSONCtrl() {
+    session = userInfo.getSessionId();
+  
+    page = ApexPages.currentPage();
+    this.action = page.getParameters().get('action');
+  }
+  
+  public void query() {
+    result = corpAPI(action);
+  }
+ 
+  public string getResult() {
+    return this.result;
+  }
+  @isTest(SeeAllData=true)
+  static void test(){
+    List<user> usrs=[select id,AccountId from user where Name='Chia Chang'];
+      system.runAs(usrs[0]){
+        Test.setCurrentPageReference(Page.corpJSON);
+        ApexPages.currentPage().getParameters().put('action', 'select id from Account limit 1');
+      corpJSONCtrl op=new corpJSONCtrl();
+      op.query();
+      string str=op.getResult();
+      }
+    
+  }
+}

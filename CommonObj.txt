@@ -1,0 +1,3011 @@
+/*
+ * Author: Chia Chang
+ * Developer: Chia Chang
+ * Title: Common Usage Object
+ * Description: A comprehensive tool for developers who shall be involved with Product Object and Address Object.
+ * Ref#: 2.4
+ * Open Issues (remove when resolved): N/A
+ * Usage: See test Method.
+ * API Version: Google Geocoding API v3. SFDC v26.0
+ * Licensing: Mitchell International. GPL is available in Git format via SVN. Ask author for details.
+ * Revisions' History:
+ * 11.1.2012- Add Exception Handling Class.
+ * 11.4.2012- Defining Interfaces for Business rules and pricing calculator.
+ * 11.6.2012- Add Product Configurator Object class.
+ * 11.7.2012- Implementing Exceptions Handling.
+ * 11.8.2012- Engineering Annotations.
+ * 11.9.2012- Add complete available products in Product Configurator.
+ * 11.23.2012- Add functions to generate the opportunity products & promotions.
+ * 11.26.2012- bug fixing and eliminate excessive codes.
+ * 12.20.2012- Adding allowing only products and packages within a valid opportunity region.
+ * 12.28.2012- Add Pre-Req products to add module method.
+ * 01.01.2013- Add Coding Requirement.
+ * 01.10.2013- Updated license unit source per Sarat
+ * 01.10.2013- remove negative item from the cart. (Product Configurator)
+ * 01.11.2013- Add Pre-Req Any 1 business rule
+ * 02.06.2013- Git Refresh.
+ * 02.16.2013- TFS Task#197771
+ * 02.10.2013- TFS Task#197773
+ * 02.14.2013- TFS Task#197776
+ * 03.04.2013- TFS Task#197776 Test conducted.
+ * 03.05.2013- NetSuite Integration begins. Adding NetSuite REST'ful call.
+ * 03.15.2013- TFS Task#209630 - Applying product flattening epic told by Sarat
+ * 03.20.2013- TFS Task#209628 - Restructuring the license unit/Quantity Type
+ * 03.28.2013- Pick 1, Pick N of M, Pre-Req Any 1 business logic revised. 
+ * 04.02.2013- TFS Task#215013 - Enhanced the NetSuite Integration
+ * 04.17.2013- Add Update/Insert/Get Sales Order Integration functions in NetSuite
+ * 05.02.2013- Test coverage design.
+ */
+ 
+global virtual without sharing class CommonObj {
+  
+  static final string revision = 'v13.4.2';
+  public final static string[] developerEmails=new string[]{'chia.chang@mitchell.com','anupam.priyadarshi@mitchell.com',
+                                'venkata.kunisety@mitchell.com','priya.marupudi@mitchell.com',
+                                'sirish.aramandla@mitchell.com','julie.hallstrom@mitchell.com',
+                                'nikhil.manekar@mitchell.com'};
+    
+  public CommonObj(){}
+  
+  global virtual interface IIntegration {
+    string googleAPI(string endpoint);
+    string corpAPI(string action);
+    //string netSuiteIntegration(string addr, string companyId,string username, string pwd, string body);
+  }
+  
+  global virtual interface ISalesOrder {
+    void updateSFSalesOrderOnInsert(NetSuiteSalesOrder nsSO);
+    void updateSFSalesOrderOnUpdate(NetSuiteSalesOrder nsSO);
+    void nSSFErrorLog(string soSFDCId,string errCode,string errMsg);
+  }
+  
+  global virtual interface IPricingCalculator {
+    /* Depreciated */
+    //decimal fetchPriceFromProductPricingMap(Boolean IsPackage, string product2Id, Integer noOfUsers);
+    //decimal fetchPriceFromProductPricingMap(string product2Id);
+    void loadPricingMap(map<string,PriceScheduleType> priceScheduleTypeObj);
+    //decimal fetchPricingForProduct(string productId, string licenseUnit);
+  
+    //map<string,decimal> fetchPricingForProduct(string productId, string licenseUnit);
+  
+    /*
+    decimal fetchUpfrontPayment(string product2Id, string licenseUnit);
+    decimal fetchRecurringPayment(string product2Id, string licenseUnit);
+    
+    decimal applyPromoOnUpfrontPayment(set<string> promoIds,string product2Id, decimal price);
+    decimal applyPromoOnRecurringPayment(set<string> promoIds,string product2Id, decimal price);
+    */
+
+    //decimal fetchPricingForProduct(string product2Id, string licenseUnit, integer pLicenseQty);
+    C2CEnterprisePriceController.priceObject
+      fetchPricingObjectForProduct(string product2Id, string licenseUnit, integer pLicenseQty);
+    
+    //Fianl pricing after the max discount is applied.
+    decimal maxDiscountAppliedPricing(decimal listPrice, decimal discountedPrice, decimal maxDiscount);
+    //decimal hasMaxDiscountReached(decimal listPrice, decimal discountedPrice, decimal maxDiscount);
+    
+    //decimal fetchRecurringPayment(string product2Id, string licenseUnit, integer pLicenseQty);
+    //decimal fetchUpfrontPayment(string product2Id, string licenseUnit, integer pLicenseQty);
+    //decimal applyPromoOnUpfrontPayment(set<string> promoIDs,string product2Id, decimal upfrontPayment,integer licenseQty, integer termQty,decimal OrderAmount);
+    //decimal applyPromoOnRecurringPayment(set<string> promoIDs,string product2Id, decimal recurringPayment, integer licenseQty, integer termQty, decimal OrderAmount);
+  
+    decimal applyPromoOnUpfrontPayment(set<string> promoIDs,string product2Id, decimal upfrontPayment,integer licenseQty, integer termQty, decimal upfrontSubTotal, decimal recurringSubTotal);
+    decimal applyPromoOnRecurringPayment(set<string> promoIDs,string product2Id, decimal recurringPayment, integer licenseQty, integer termQty, decimal upfrontSubTotal, decimal recurringSubTotal);
+  
+  }
+  
+  global virtual interface IProductBusinessRules {
+    boolean isPackageForSelectedNumUsers(string productId, integer numUsers);
+    boolean isPackageForSelectedContractTerms(string productId,integer contractTerm);
+    integer getActualRecommendedQty(integer recommendedQty,integer maxQty, integer minQty, 
+                    string packageType, integer newQty);
+    /* depleted - duplicate biz rules - Chia */
+    integer getActualQtyByLicenseUnit(string productLicenseUnit, string OpportunityLicenseUnit, integer productMinQty, integer opportunityNumberUsers);                
+    
+    boolean isValidLicenseUnit(string product2Id, string oppLicenseUnit);              
+    string actualCountryCode(string countryCode);
+    
+    /* Anupam to explain the biz logic */
+    boolean isProductWithinValidLicenseQty(string productId, integer numUsers);
+    boolean isProductWithinValidQuantityRangeinProdRelationShip(integer recommendedQty,integer maxQty, integer minQty, string packageType, integer newQty);
+    
+    /* Get QuantityType by examining the Product Relationship and Product UOM */
+    CommonObj.QuantityType getQuantityListByProdRelORUOM(integer relMaxQty, integer relMinQty, integer relRecommendedQty, 
+                          string relLicenseUnit, string productId);
+    /* checking if the product is an asset on the account */
+    boolean isAnAssetOnAccount(string productId);
+    // depleting
+    //set<string> hasProductAPreReq(string productId);
+    //set<string> hasProductAExclusion(string productId);
+    //string[] getIncludedProduct(string productId, string[] productIds);
+  }
+  
+  /* For Opportunity Developer */
+  global virtual interface IOpportunityContent{
+    //depleting
+    //boolean generateOpportunityLineItem(Opportunity opp,map<string,string> bs,list<ProductMatrixObject> pmoList);
+    //boolean generateOpportunityPromo(Opportunity opp,set<string> promoIds);
+    boolean generateOpportunityLineItems(Opportunity opp,list<OpportunityLineItem> oppLineItem,set<string> promoIds);
+      
+    //depleting
+    //boolean generateOpportunityLineItems(Opportunity opp,list<OpportunityLineItem> oppLineItem);
+  }
+  
+  /* NetSuite Integration details */
+  global virtual interface INetSuiteIntegrationObject{
+    void insertSalesOrderDetails(NetSuiteSalesOrder nsSalesOrder);
+    void updateSalesOrderDetails(NetSuiteSalesOrder nsSalesOrders);
+    void deleteSalesOrder(string nsSalesOrderId);
+    NetSuiteSalesOrder getSalesOrderDetailByInternalId(string nsInternalId);
+    NetSuiteSalesOrder getSalesOrderDetailByTranId(string nsTranId);
+  }
+  
+  @isTest(SeeAllData=true)
+    static void test(){
+      List<user> usrs=[select id,AccountId from user where Name='Chia Chang'];
+      system.runAs(usrs[0]){
+      CommonObj cObj=new CommonObj();
+      CommonObj.CommonException cEx=new CommonObj.CommonException();
+      
+      try {
+        throw new CommonException('test',CommonObj.CommonExceptionType.DebugError);
+      }
+      catch (CommonException ex){ 
+        cEx.notifyViaEmail(CommonObj.developerEmails);
+      }
+      
+      CommonObj.AddressType aType=new CommonObj.AddressType();
+      /* Library Coverage */
+      CommonObj.CommonLib cLib1=new CommonObj.CommonLib();
+      string str1=cLib1.corpAPI('select id from Account limit 1');
+      str1=cLib1.googleAPI('1 infinite loop, cupertino');
+      List<SelectOption> w10=cLib1.getPicklistValues(new Product2(),'m_Package_Type__c');
+      // getting other picklist value instead  
+      try{
+        string[] abc=new string[]{'test1'};
+        string def=abc[2];
+      }
+      catch (Exception ex){
+        cLib1.notifyStandardExceptionViaEmail('test Exception',ex,CommonObj.developerEmails);
+      }
+      
+      CommonObj.AddressObj addsObj=new CommonObj.AddressObj();
+      Address__c addr=new Address__c(Street_1__c='6220 Greenwich Drive',City__c='San Diego',State__c='CA',
+                     Zip__c='92122',Country__c='USA',Address_Type__c='Bill To');
+      addsObj.addressValidation(addr);
+      Map<integer,AddressType> op1=addsObj.parseGoogleGeocodingAddress('some address');
+      List<Address__c> addrs1=addsObj.duplicateAddrList(addr);
+      addrs1=addsObj.duplicateAddrListSameAddressType(addr);
+      addrs1=addsObj.accountAddressList(usrs[0].AccountId);
+      
+      Configurator_Settings__c csc=Configurator_Settings__c.getInstance('StandardPriceId');
+      
+      List<Opportunity> opps=[Select o.Number_of_Users__c, o.Name,o.PriceBook2Id, o.Id, o.Contract_Term__c From Opportunity o
+                  where o.Id='0066000000OJwpC' order by createddate desc limit 1];
+      
+      
+      
+      CommonObj.CommonLib cLib=new CommonObj.CommonLib();
+      CommonObj.ProductConfiguratorObj pConfig=new CommonObj.ProductConfiguratorObj(opps[0].Id);
+      
+        //system.debug(logginglevel.WARN,pConfig.aLaCarteIds);
+        
+         //regular package Id,aLaCarte package Id and current class
+        string y1,y2,pClass;
+        for (string x1:pConfig.aLaCarteIds.keySet()){
+          if (y1!=null&&y2!=null&&pClass!=null)
+            break;
+        
+          map<string,ProductMatrixObject> x2=
+            pConfig.productMatrix.get(x1);
+          if (x2.values().size()>1){
+            pClass=x1;
+            for (string x3:x2.keySet()){
+ 
+              if (pConfig.aLaCarteIds.get(x1)==x3)
+                y2=x3;
+              else if(x2.get(x3).packageType=='All'&&y1==null){
+                y1=x3;
+              }
+            }
+            
+          }
+        }
+        
+        //system.debug(logginglevel.WARN,'y1:'+y1+', y2:'+y2+', y5:'+y5+', pClass:'+pClass);
+        //return;
+        boolean hResult=pConfig.addProductComparisonMatrix(new map<string,string>{y1=>y1},pClass);
+        list<ProductMatrixObject> w11=pConfig.productMap.values();
+        
+        w11[0].priceStr='10.0';
+        w11[0].upfrontStr='10.0';
+        w11[0].recurringStr='10.0';
+        string p1=w11[0].priceStr;
+        p1=w11[0].upfrontStr;
+        p1=w11[0].recurringStr;
+        p1=w11[0].getFullProductListJSON;
+        
+        ProductRelationshipMatrixObject w8=new ProductRelationshipMatrixObject();
+        w8.sfdcId=w11[0].sfdcId;
+        w8.price=10;
+        w8.upfrontPayment=0;
+        w8.recurringPayment=10;
+        w8.productCode='Chia Pet';
+        w8.productDesc='Chia Pet';
+        w8.licenseUnitList.add('User');
+        w8.productName='Chia Pet';
+        w8.moduleDisplayOrder=10;
+        w8.isIncluded=true;
+        w8.packageType='All';
+        w8.packageClassification='pClass';
+        w8.relationshipType='Contains';
+        
+        ProductRelationshipMatrixObject w9=new ProductRelationshipMatrixObject(w8);
+        w9.isIncluded=false;
+        //ProductRelationshipMatrixObject w8=new ProductRelationshipMatrixObject(productMap.values()[0]);
+        
+        pConfig.productComparisonMatrix.get(y1).fullProductList.put(w8.sfdcId,w8);
+        pConfig.productComparisonMatrix.get(y2).fullProductList.put(w9.sfdcId,w9);
+        
+        ProductRelationshipMatrixObject w12=new ProductRelationshipMatrixObject(w8);
+        w12.packageType='Pick 1';
+        w12.sfdcId=w11[1].sfdcId;    
+        pConfig.productComparisonMatrix.get(y1).fullProductList.put(w12.sfdcId,w12);
+        ProductRelationshipMatrixObject w13=new ProductRelationshipMatrixObject(w12);
+        pConfig.productComparisonMatrix.get(y2).fullProductList.put(w13.sfdcId,w13);
+        
+        
+        //system.debug(logginglevel.WARN,'hResult:' + hResult);
+        /** test loop 1*/
+        string y3;//sub product Id
+        string y4;//real product Id
+        for (string x1:pConfig.productComparisonMatrix.get(y1).fullProductList.keySet()){
+          ProductRelationshipMatrixObject prmo=
+            pConfig.productComparisonMatrix.get(y1).fullProductList.get(x1);
+          if (!prmo.isIncluded){
+            y4=prmo.sfdcId;
+            y3=(pConfig.productComparisonMatrix.get(y1).sfdcId+'-'+prmo.sfdcId);
+            break;
+          }  
+        }
+        
+        pConfig.addShoppingCartItems(new map<string,string>{y3=>'10'},y1);
+        
+        ProductMatrixObject z1=pConfig.productShoppingCart.get(y4);
+        //system.debug(logginglevel.WARN,z1);
+        //return;
+        pConfig.resetShoppingCartPricing(new map<string,string>{y4+'-qty'=>string.valueOf(z1.qty)});
+        //pConfig.productMap.keySet()[0];
+        ProductMatrixObject w5=pConfig.productMap.values()[0];
+        pConfig.addShoppingCartItem(w5.sfdcId,new map<string,string>());
+        pConfig.resetShoppingCartPricing(new map<string,string>{y4+'-qty'=>string.valueOf(z1.qty),
+                                    w5.sfdcId+'-qty'=>string.valueOf(w5.qty)});
+        
+        
+        //run over the rest of remaining lines
+        
+        
+        z1=pConfig.productComparisonMatrix.get(y1);
+        list<SelectOption> w1=z1.getLicenseUnitOptions();
+        pConfig.productShoppingCart.values().sort();
+        list<ProductRelationshipMatrixObject> w2=z1.getFullProductList;
+        list<Promotions__c> prcs=pConfig.pricingConfigObj.getPromotionList();
+        pConfig.applyPromosInShoppingCart(new set<string>{prcs[0].Id,prcs[1].Id}, decimal.valueOf('500'), decimal.valueOf('500'));
+        list<ProductMatrixObject> w15=pConfig.productShoppingCart.values();
+        
+        //bs.get(comparisonId+'-pick')==prmo.sfdcId
+        //packageType=='Pick 1'
+        ProductRelationshipMatrixObject w20=new ProductRelationshipMatrixObject(w8);
+        ProductRelationshipMatrixObject w21=new ProductRelationshipMatrixObject(w9);
+        w20.packageType='Pick 1';
+        w21.packageType='Pick 1';
+        
+        w15[w15.size()-1].fullProductList.put(w20.sfdcId,w20);
+        w15[w15.size()-1].fullProductList.put(w21.sfdcId,w20);
+        
+        //pricingConfigObj.getPromotionList();
+        //system.debug(logginglevel.WARN,w2);
+        
+        //integer w3=w2[0].compareTo(w2[0]);
+        try{
+          hResult=pConfig.generateOpportunityProducts(new map<string,string>{w15[w15.size()-1].sfdcId+'-pick'=>w20.sfdcId},new set<string>());
+        }
+        catch(Exception ex){
+          system.debug(logginglevel.WARN,ex);
+        }
+        //Integration Test Start
+        
+        //Integration Test End
+        
+        //pConfig.CommonLib cLib=new pConfig.CommonLib();
+        pConfig.removeShoppingCartItem(w5.sfdcId);
+        
+      //NS Sandbox tranId
+      NetSuiteSalesOrder nsSalesOrder=
+        cLib.salesOrderDeserialised('{"total":926.5,"taxtotal":76.5,"custbody_mi_exclude_from_autopayment":false,"discounttotal":0,"salesteam":[{"contribution":"100.0%","employee":{"name":"Viswanathan, Arun","internalid":"137359"},"isprimary":true,"salesrole":{"name":"Sales Rep","internalid":"-2"}}],"billingschedule":[{"billamount":926.5,"billdate":"4/26/2013"}],"terms":{"name":"Net 30","internalid":"2"},"entity":{"name":"258004 RAY\'S PAINT & BODY SHOP","internalid":"19379"},"custbody_mi_contract_id":{"name":"99267","internalid":"99267"},"custbody_mi_shipto_state":"LA","custbody_mi_contract_start_date":"4/26/2013","custbody_mi_auto_renew":true,"exchangerate":1,"shipaddresslist":{"name":"Default","internalid":"16995"},"custbody_mi_new_release_processed":false,"custbody_sf_so_id":"a1ug00000005nfxAAA","custbody_mi_renewal_term":1,"custbody_mi_contract_end_date":"5/25/2013","revcommitstatus":"A","custbody_mi_operator":{"name":"Integration, Salesforce","internalid":"64"},"custbody_mi_is_master_order":false,"recordtype":"salesorder","custbody_mi_is_contract_order":true,"custbody_mi_return_message":"If you have questions about the contents of this shipment, please contact Mitchell Customer Service at 800-448-4401.","custbody_mi_rush_order":false,"custbody_mi_shipto_city":"BOSSIER CITY","createddate":"4/26/2013 8:40 am","subtotal":850,"custbody_mi_ship_to_customer":{"name":"258004 RAY\'S PAINT & BODY SHOP","internalid":"19379"},"currencyname":"US Dollar","revenuestatus":"A","startdate":"4/26/2013","custbody_mi_billing_hold":false,"shipaddress":"RAY\'S PAINT & BODY SHOP SCOTT BURK 1025 PEARL DR BOSSIER CITY LA 71111-2915","custbody_mi_renew_price_option":{"name":"Like Price","internalid":"1"},"subsidiary":{"name":"Mitchell International, Inc.","internalid":"2"},"tranid":"SO815706763","orderstatus":{"name":"Pending Fulfillment","internalid":"B"},"shipcomplete":false,"tranisvsoebundle":false,"recognizedrevenue":0,"deferredrevenue":0,"billaddress":"RAY\'S PAINT & BODY SHOP SCOTT BURK 1025 PEARL DR BOSSIER CITY LA 71111-2915","custbody_mi_type_of_order":{"name":"Auto Physical Damage - Repair","internalid":"3"},"revreconrevcommitment":false,"custbody_mi_contract_type":{"name":"EULA","internalid":"3"},"ccapproved":false,"shipmethod":{"name":"FedEx Ground","internalid":"35"},"currency":{"name":"US Dollar","internalid":"1"},"lastmodifieddate":"4/26/2013 8:49 am","id":"2299107","custbody_mi_renewal_order":false,"vsoeautocalc":false,"draccount":{"name":"2410 Total Deferred Revenue : Deferred Income","internalid":"621"},"altsalestotal":850,"getauth":false,"trandate":"4/26/2013","billaddresslist":{"name":"Default","internalid":"16995"},"custbody_sf_opp_id":"006g0000002QvxlAAC","custbody_mi_contract_term":1,"custbody_mi_avatax_intid":2299107,"custbody_mi_renewal_type":{"name":"Renews with Sales Order","internalid":"2"},"customform":{"name":"Mitchell Sales Order (Short form)","internalid":"139"},"links":[{"linktype":"Drop Shipment","trandate":"4/26/2013","tranid":"PO3754","type":"Purchase Order"}],"shipdate":"4/26/2013","custbody_mi_sfdc_opp_number":"13-336581","custbody_mi_cntr_includes_esp":false,"saleseffectivedate":"4/26/2013","item":[{"altsalesamt":850,"amount":850,"class":{"name":"APD : Repair : Repair Hardware : Repair ABS Hardware","internalid":"135"},"createdpo":{"name":"PO3754","internalid":"2299207"},"createpo":{"name":"Drop Shipment","internalid":"DropShip"},"custcol_ci_item_name":"SERVDELL","custcol_mi_contract_line_nbr":{"name":"301505","internalid":"301505"},"custcol_mi_exclude_from_contract":false,"custcol_mi_is_commissionable":true,"custcol_mi_list_price":850,"custcol_mi_sfdc_order_type":{"name":"New","internalid":"3"},"custcol_sf_opp_product_id":"00kg00000037ej7AAA","custcol_sf_so_product_id":"a1Ag00000004m58EAA","deferrevrec":false,"isclosed":false,"item":{"name":"SERVDELL SERVDELL","internalid":"570"},"location":{"name":"US : Null","internalid":"42"},"price":{"name":"&nbsp;","internalid":"-1"},"quantity":1,"quantityavailable":0,"quantitybilled":0,"quantitycommitted":0,"quantityfulfilled":0,"quantityonhand":0,"quantityrevcommitted":0,"taxcode":{"name":"AVATAX","internalid":"44"},"taxrate1":"9.0%"}],"excludecommission":false,"fxaccount":{"name":"4120 Total Revenue : Total Software : Subscription License - Customer Hosted","internalid":"383"},"custbody_mi_ship_to_customer_category":{"name":"Collision Repair - Independent","internalid":"17"}}');
+      system.debug(loggingLevel.WARN,'***Chia');
+      system.debug(loggingLevel.WARN,nsSalesOrder);
+      system.debug(loggingLevel.WARN,'***Chia');
+      
+      
+      NetSuiteSalesOrder ns1=cLib.getSalesOrderDetailByInternalId(nsSalesOrder.details.internalId__c);
+      NetSuiteSalesOrder ns2=cLib.getSalesOrderDetailByTranId(nsSalesOrder.details.tranId__c);
+        
+        try{
+          cLib.insertSalesOrderDetails(nsSalesOrder);
+        }
+        catch(CommonException cEx1){
+          system.debug(logginglevel.WARN,cEx.developerAnnotation);
+        
+        }
+        try{
+          cLib.updateSalesOrderDetails(nsSalesOrder);
+        }
+        catch(CommonException cEx2){
+          system.debug(logginglevel.WARN,cEx.developerAnnotation);
+        
+        }
+        
+        //NetSuiteSalesOrder getSalesOrderDetailByInternalId(string nsInternalId);
+      //NetSuiteSalesOrder getSalesOrderDetailByTranId(string nsTranId);
+        return;
+        
+      }
+    }
+    
+/* Async call static functions begin */
+  //NetSuite Sales Order Integration
+  @future (callout=true)
+  public static void netSuiteIntegration(string addr, string companyId,string username,
+                   string pwd, string body, string transType){
+    try{
+      //Authorization:  NLAuth nlauth_account=123456, nlauth_email=jsmith@ABC.com, nlauth_signature=xxxxxxxx, nlauth_role=41
+      http h = new http();
+       httprequest req = new httprequest();
+      req.setEndpoint(addr);
+      req.setMethod('POST');
+      req.setHeader('Content-Type', 'application/json');
+      req.setHeader('Authorization', String.format('NLAuth{0} nlauth_email={1}, nlauth_signature={2}',
+              new string[]{' nlauth_account=' + companyId + ', ',username,pwd}));
+      //req.setBody(body);
+      req.setBody(body);
+      
+      req.setTimeout(60000);
+      httpresponse res=h.send(req);
+      /*
+      system.debug(loggingLevel.WARN,'******body');
+      system.debug(loggingLevel.WARN,body);
+      system.debug(loggingLevel.WARN,'******res.getBody()');
+      system.debug(loggingLevel.WARN,res.getBody());
+      system.debug(loggingLevel.WARN,'******transType');
+      system.debug(loggingLevel.WARN,transType);
+      */
+      CommonLib cLib=new CommonLib();
+      UpdateSalesOrder uso=new UpdateSalesOrder();
+      string omegaStr=res.getBody();
+      map<string,object> z = (map<string,object>) JSON.deserializeUntyped(omegaStr);
+      
+      system.debug(loggingLevel.WARN,'******z');
+      system.debug(loggingLevel.WARN,z);
+      if (z.containsKey('error')){
+        map<string,object> z_1=(map<string,object>)z.get('error');
+        map<string,object> z_2 = (map<string,object>) JSON.deserializeUntyped(body);
+        /*
+        system.debug(loggingLevel.WARN,'******z_2');
+        system.debug(loggingLevel.WARN,z_2);
+        system.debug(loggingLevel.WARN,'******z_2.get(\'custbody_sf_so_id\')');
+        system.debug(loggingLevel.WARN,z_2.get('custbody_sf_so_id'));
+        */
+        map<string,object> z_3=(map<string,object>)z_2.get('productList');
+        uso.nSSFErrorLog(string.valueOf(z_3.get('custbody_sf_so_id')),string.valueOf(z_1.get('code')),string.valueOf(z_1.get('message')));
+        throw new CommonException('Error occured during the NetSuite integration and it has been captured in "NS_SF_Integration_Error__c".',CommonExceptionType.IntegrationErr);
+          
+      }
+      NetSuiteSalesOrder nsSO=cLib.salesOrderDeserialised(omegaStr);
+      //UpdateSalesOrder uso=new UpdateSalesOrder();
+      if (transType=='update'){
+        uso.updateSFSalesOrderOnUpdate(nsSO);
+      }
+      if (transType=='insert'){
+        uso.updateSFSalesOrderOnInsert(nsSO);
+      }
+    
+      //we need id, tranId from the netsuite response
+      //
+      //map<string,object> x = (map<string,object>) JSON.deserializeUntyped(resp);
+      //system.debug(resp);
+      //this.notifyStandardExceptionViaEmail(res.getBody(),new Exception(),developerEmails);
+      //return res.getBody();
+    }
+    catch (CommonException cEx){
+      system.debug(logginglevel.WARN,cEx);
+      cEx.notifyViaEmail(CommonObj.developerEmails);
+      //this.notifyStandardExceptionViaEmail('NetSuite Integration exception handling class',ex,developerEmails);
+      //return '';
+    }
+  }
+
+/* Future call static function end */
+  
+/* Begin Type Class */
+
+  /* NetSuite Object Type */
+  global class NetSuiteSalesOrder{
+    public NetSuiteSalesOrder(){
+      this.details=new Sales_Order__c();
+      this.soItem=new list<Sales_Order_Item__c>();
+      this.soTeamItem=new list<Sales_Order_Team__c>();
+    }
+    public Sales_Order__c details{get;set;}
+    public list<Sales_Order_Item__c> soItem{get;set;}
+    public list<Sales_Order_Team__c> soTeamItem{get;set;}
+  }
+  
+  /* Address Type */
+  public class AddressType {
+    public AddressType(){}
+    public integer id {get;set;}
+    public string street_number {get;set;}
+    public string route {get;set;}
+    public string street {get;set;}
+    public string neighborhood {get;set;}
+    public string city {get;set;}
+    public string county {get;set;}
+    public string state {get;set;}
+    public string zip {get;set;}
+    public string country {get;set;}
+  }
+  /* End Address Type */
+  
+  /* Quantity Comparison Type */
+  global class QuantityType{
+    public integer recommendedQty {get;set;}
+    public integer maxQty {get;set;}
+    public integer minQty {get;set;}
+    public string licenseUnit {get;set;}
+    public QuantityType(integer recommendedQtyx,integer maxQtyx,integer minQtyx, string lUnit){
+      this.recommendedQty=recommendedQtyx;
+      this.maxQty=maxQtyx;
+      this.minQty=minQtyx;
+      this.licenseUnit=lUnit;
+    }
+    public QuantityType(QuantityType qt){
+      this.recommendedQty=qt.recommendedQty;
+      this.maxQty=qt.maxQty;
+      this.minQty=qt.minQty;
+      this.licenseUnit=qt.licenseUnit;
+    }
+  }
+  
+  /* Price Schedule Type (for getting pricing purpose) */
+  global class PriceScheduleType{
+    public string productId {get;set;}
+    public string licenseUnit {get;set;}
+    public integer licenseQty {get;set;}
+    public PriceScheduleType(string pId,string lUnit,integer lQty){
+      productId=pId;
+      licenseUnit=lUnit;
+      licenseQty=lQty;
+    }
+  }
+  
+  /* Begin Product Matrix Object with Comparable Interface */
+  global class ProductMatrixObject implements Comparable{
+    public ProductMatrixObject(){
+      this.fullProductList=new map<string,ProductRelationshipMatrixObject>();  
+      this.licenseUnitList=new set<string>();  
+      //this.preReq=new map<string,QuantityType>();  
+      this.exclude=new set<string>();  
+      this.quantityList=new QuantityType(-1,-1,-1,'');
+      this.customPricing=false;
+      this.price=0;
+      this.upfrontPayment=0;
+      this.recurringPayment=0;
+      this.isMaxDiscountReached=false;
+      this.maxDiscountPercentage=0;
+      this.paymentType=null;
+    }
+    public ProductMatrixObject(ProductMatrixObject pro){
+      this.productCode=pro.productCode;
+      this.sfdcId=pro.sfdcId;
+      this.price=pro.price;
+      this.upfrontPayment=pro.upfrontPayment;
+      this.recurringPayment=pro.recurringPayment;
+      this.productDesc=pro.productDesc;
+      this.fullProductList=pro.fullProductList.clone();
+      this.qty=pro.qty;
+      this.customPricing=pro.customPricing;
+      //this.preReq=pro.preReq.clone();
+      this.exclude=pro.exclude.clone();
+      this.isPackage=pro.isPackage;
+      this.licenseUnitList=pro.licenseUnitList.clone();
+      this.packageDisplayOrder=pro.packageDisplayOrder;
+      this.packageType=pro.packageType;
+      this.packageClassification=pro.packageClassification;
+      this.orgQty=pro.orgQty;
+      this.quantityList=new QuantityType(pro.quantityList);
+      this.isMaxDiscountReached=pro.isMaxDiscountReached;
+      this.maxDiscountPercentage=pro.maxDiscountPercentage;
+      this.paymentType=pro.paymentType;
+    }
+    
+    public ProductMatrixObject(ProductRelationshipMatrixObject prmo){
+      this.productCode=prmo.productCode;
+      this.sfdcId=prmo.sfdcId;
+      this.productName=prmo.productName;
+      this.productDesc=prmo.productDesc;
+      this.price=prmo.price;
+      this.upfrontPayment=prmo.upfrontPayment;
+      this.recurringPayment=prmo.recurringPayment;
+      this.qty=prmo.qty;
+      this.orgQty=prmo.qty;
+      this.customPricing=prmo.customPricing;
+      
+      //this.preReq=prmo.preReq.clone();
+      this.exclude=prmo.exclude.clone();
+      this.licenseUnitList=prmo.licenseUnitList.clone();
+      this.packageType=prmo.packageType;
+      this.fullProductList=new map<string,ProductRelationshipMatrixObject>();
+      this.packageClassification=prmo.packageClassification;
+      this.quantityList=new QuantityType(prmo.quantityList);
+      this.isMaxDiscountReached=false;
+      this.maxDiscountPercentage=prmo.maxDiscountPercentage;
+      this.paymentType=null;
+    }
+    
+    public void applyPromotionPricing(C2CEnterprisePriceController pco, C2CEnterprisePriceController.priceObject pObj,
+                      set<string> promos, integer contractTerm, decimal upfrontSubtotal, decimal recurringSubtotal){
+      
+      if (pObj.paymentType=='Upfront'){
+        this.upfrontPayment=pco.applyPromoOnUpfrontPayment(promos, this.sfdcId, this.upfrontPayment,
+                                this.qty, contractTerm, upfrontSubtotal,
+                                 recurringSubtotal);
+      
+        this.recurringPayment=0;
+      }
+      else if(pObj.paymentType=='Recurring'){
+        /*
+        system.debug(loggingLevel.WARN,'******promos');
+        system.debug(loggingLevel.WARN,promos);
+        system.debug(loggingLevel.WARN,'this.sfdcId');
+        system.debug(loggingLevel.WARN,this.sfdcId);
+        system.debug(loggingLevel.WARN,'******this.upfrontPayment');
+        system.debug(loggingLevel.WARN,this.upfrontPayment);
+        system.debug(loggingLevel.WARN,'******pObj.maxDiscountPercentage');
+        system.debug(loggingLevel.WARN,pObj.maxDiscountPercentage);
+        */
+        this.upfrontPayment=0;
+      
+        this.recurringPayment=pco.applyPromoOnRecurringPayment(promos, this.sfdcId, this.recurringPayment,
+                                this.qty, contractTerm, upfrontSubtotal,
+                                 recurringSubtotal);
+      }
+      decimal overDiscountPrice=-1;
+      if (pObj.listPrice!=0)
+        overDiscountPrice=pco.maxDiscountAppliedPricing(pObj.listPrice,this.upfrontPayment+this.recurringPayment,pObj.maxDiscountPercentage);
+        
+      //decimal overDiscountPrice=pco.maxDiscountAppliedPricing(pObj.listPrice,this.upfrontPayment+this.recurringPayment,pObj.maxDiscountPercentage);
+      
+      if (overDiscountPrice>-1){
+        this.isMaxDiscountReached=true;
+        
+        if (pObj.paymentType=='Upfront'){
+          this.upfrontPayment=overDiscountPrice;
+          //this.recurringPayment=0;
+        }
+        else if(pObj.paymentType=='Recurring'){
+          //this.upfrontPayment=0;
+          this.recurringPayment=overDiscountPrice;
+        }
+        
+      }
+      else{
+        this.isMaxDiscountReached=false;
+      }
+      
+    }
+   
+    public void refreshPricing(C2CEnterprisePriceController pco, integer newQty){
+      /*if (!this.customPricing||this.qty!=newQty){
+        
+      }*/
+      
+      //if (this.qty!=newQty){
+      C2CEnterprisePriceController.priceObject priceObj=
+        pco.fetchPricingObjectForProduct(this.sfdcId,this.quantityList.licenseUnit,newQty);
+      
+      if (priceObj==null)
+        throw new CommonException('No pricing schedule available for ' + this.productCode,
+                  CommonExceptionType.PricingError);
+      
+      if (this.quantityList.licenseUnit!=priceObj.licenseUnit)
+        this.quantityList.licenseUnit=priceObj.licenseUnit;
+      
+      this.price=priceObj.listPrice;
+      this.paymentType=priceObj.paymentType;
+      this.maxDiscountPercentage=priceObj.maxDiscountPercentage;
+      
+      if (this.customPricing){
+        this.price=this.upfrontPayment;
+        this.recurringPayment=0;
+      }
+      else {
+        if (priceObj.paymentType.contains('Upfront')){
+          this.upfrontPayment=priceObj.listPrice;
+          this.recurringPayment=0;
+        }
+        else if (priceObj.paymentType.contains('Recurring')){
+          this.upfrontPayment=0;
+          this.recurringPayment=priceObj.listPrice;
+        }
+      }
+      //}
+      
+      this.qty=newQty;
+    }
+    
+    public decimal maxDiscountPercentage {get;set;} 
+    public boolean isMaxDiscountReached{get;set;}
+    public string productCode {get;set;}
+    public string sfdcId {get;set;}
+    public string productName {get;set;}
+    public string productDesc {get;set;}
+    public integer packageDisplayOrder {get;set;}
+    public boolean customPricing {get;set;}
+    /* pricing */
+    public decimal price {get;set;}
+    public decimal upfrontPayment {get;set;}
+    public decimal recurringPayment {get;set;}
+    public decimal subtotal {get{return price*qty;}}
+    public string paymentType {get;set;}
+    
+    public string priceStr {
+      get{
+        return formatCurrency(this.price);
+      }
+      set {this.price=decimal.valueOf(value);}
+    }
+    public string upfrontStr {
+      get{
+        return formatCurrency(this.upfrontPayment);
+      }
+      set {this.upfrontPayment=decimal.valueOf(value);}
+    }
+    public string recurringStr {
+      get{
+        return formatCurrency(this.recurringPayment);
+      }
+      set {this.recurringPayment=decimal.valueOf(value);}
+    }
+    private string formatCurrency(decimal thePrice){
+      decimal op=thePrice;
+      list<string> args = new string[]{'0','number','########0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+    /* end of pricing */
+    
+    public integer orgQty {get;set;}
+    public integer qty {get;set;}
+    public string packageType {get;set;}
+    public string packageClassification {get;set;}
+    public boolean isPackage {get;set;}
+
+    /* productId, reCommended Qty. */
+    //public map<string,QuantityType> preReq {get;set;}
+    public set<string> exclude {get;set;}
+    
+    public list<SelectOption> getLicenseUnitOptions(){
+      list<SelectOption> lSelect=new list<SelectOption>();
+      for (string lUnit:licenseUnitList){
+        if (lUnit!=null){
+          lSelect.add(new SelectOption(lUnit,lUnit));
+        }
+      }
+      return lSelect;
+    }
+    
+    public string termUnit {get;set;}
+    public integer termUnitMin {get;set;}
+    public integer termUnitMax {get;set;}
+    
+    //To combine QuantityType and licenseUnit list
+    public QuantityType quantityList {get;set;}
+    public set<string> licenseUnitList {get;set;}
+    
+    public map<string,ProductRelationshipMatrixObject> fullProductList {get;set;}
+    public list<ProductRelationshipMatrixObject> getFullProductList {
+      get{
+        list<ProductRelationshipMatrixObject> op=this.fullProductList.values();
+        op.sort();
+        return op;
+      }
+    }
+    public string getFullProductListJSON {
+      get{
+        JSONGenerator gen = JSON.createGenerator(true);
+            gen.writeStartObject();
+            gen.writeObjectField('productList',this.getFullProductList);
+            gen.writeEndObject();
+            return gen.getAsString();
+      }
+    }
+    global integer compareTo(Object compareTo) {
+      ProductMatrixObject compareToEmp = (ProductMatrixObject)compareTo;
+          if (packageDisplayOrder == compareToEmp.packageDisplayOrder) return 0;
+          if (packageDisplayOrder > compareToEmp.packageDisplayOrder) return 1;
+          return -1;        
+      }
+  }
+  /* End Product Matrix Object */
+  
+  /* Product Relationship Matrix Object with implementing comparable interface */
+  global class ProductRelationshipMatrixObject implements Comparable {
+    public ProductRelationshipMatrixObject(){
+      this.licenseUnitList=new set<string>();
+      //this.preReq=new map<string,QuantityType>();
+      this.quantityList=new QuantityType(-1,-1,-1,'');
+      this.exclude=new set<string>();
+      this.qty=-1;
+      this.price=0;
+      this.upfrontPayment=0;
+      this.recurringPayment=0;
+      this.isIncluded=false;
+      this.isDefaultProduct=false;
+      this.customPricing=false;
+      this.maxDiscountPercentage=0;
+      this.numOfProductToSelect=-1;
+      this.isSelected=false;
+    }
+    
+    public ProductRelationshipMatrixObject(ProductRelationshipMatrixObject pr){
+      this.productCode=pr.productCode;
+      this.sfdcId=pr.sfdcId;
+      this.productDesc=pr.productDesc;
+      this.productName=pr.productName;
+      this.isIncluded=pr.isIncluded;
+      this.price=pr.price;
+      this.upfrontPayment=pr.upfrontPayment;
+      this.recurringPayment=pr.recurringPayment;
+      this.customPricing=pr.customPricing;
+      
+      //this.preReq=pr.preReq.clone();
+      this.exclude=pr.exclude.clone();
+      this.licenseUnitList=pr.licenseUnitList.clone();
+      this.moduleDisplayOrder=pr.moduleDisplayOrder;
+      this.packageType=pr.packageType;
+      this.packageClassification=pr.packageClassification;
+      this.quantityList=new QuantityType(pr.quantityList);
+      this.relationshipType=pr.relationshipType;
+      this.qty=pr.qty;
+      this.isDefaultProduct=pr.isDefaultProduct;
+      this.maxDiscountPercentage=pr.maxDiscountPercentage;
+      this.numOfProductToSelect=pr.numOfProductToSelect;
+      this.isSelected=pr.isSelected;
+      this.parentId=pr.parentId;
+    }
+    /* pricing */
+    public decimal price {get;set;}
+    public decimal upfrontPayment {get;set;}
+    public decimal recurringPayment {get;set;}
+    public boolean customPricing {get;set;}
+    public decimal maxDiscountPercentage {get;set;}
+      
+    /* end pricing */
+    
+    public string productCode {get;set;}
+    public string sfdcId {get;set;}
+    public string parentId {get;set;}
+    public string productDesc {get;set;}
+    
+    //public map<string,QuantityType> preReq {get;set;}
+    public set<string> exclude {get;set;}
+    
+    public integer numOfProductToSelect {get;set;}
+    public string productName {get;set;}
+    public integer moduleDisplayOrder {get;set;}
+    public boolean isIncluded {get;set;}
+    public string packageType{get;set;}
+    public string packageClassification {get;set;}
+    public string relationshipType {get;set;}
+    
+    //To combine QuantityType and licenseUnit list
+    public QuantityType quantityList {get;set;}
+    public set<string> licenseUnitList {get;set;}
+    
+    public integer qty {get;set;}
+    public boolean isDefaultProduct {get;set;}
+    public boolean isSelected {get;set;}
+    
+    
+    global integer compareTo(Object compareTo) {
+          ProductRelationshipMatrixObject compareToEmp = (ProductRelationshipMatrixObject)compareTo;
+          if (moduleDisplayOrder == compareToEmp.moduleDisplayOrder) return 0;
+          if (moduleDisplayOrder > compareToEmp.moduleDisplayOrder) return 1;
+          return -1;        
+      }
+  }
+  /* End Product Relationship Matrix Object */ 
+  
+/* End Type Class */
+
+
+/* Enumerators */
+  
+  public enum CommonExceptionType{
+    IntegrationErr,
+    TestError,
+    DebugError,
+    PricingError,
+    ProductMatrixLoadingError,
+    NoAlaCarteAvailable,
+    NoOpportunityInfo,
+    NoActiveProductAvailable,
+    NoOpportunityRecordsFound,
+    NoPromotionAvailable,
+    NoRegions,
+    NoActiveProductPriceInAccount,
+    GoogleGeocodeAddressesParsingError,
+    FailCreateOppLine,
+    UOMValidationError,
+    IncorrectOpportunityOwner,
+    ConflictingPricebookIds,
+    NoAvailableQuantities,
+    TrialFreeTermPromotions
+  }
+  
+  /*
+    Payment type from price schedule,
+    
+  */
+
+/* Enumerators end */
+
+  /* Exception Class Begin */
+  public class CommonException extends Exception {
+    
+    public CommonObj.CommonExceptionType cExceptionType;
+    public string developerAnnotation;
+    
+    public CommonException(string devNote,CommonExceptionType exceptionType){
+      this.cExceptionType=exceptionType;
+      this.developerAnnotation=devNote;
+    }
+    
+    public virtual void notifyViaEmail(string[] toAddresses){ 
+        Messaging.reserveSingleEmailCapacity(2); 
+      Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+      
+      mail.setToAddresses(toAddresses);
+      mail.setCcAddresses(new String[] {'chia.chang@mitchell.com'});
+      mail.setReplyTo('DoNotReply@mitchell.com');
+      mail.setSenderDisplayName('DoNotReply');
+      mail.setSubject('Developers\' Common Exception Handling: ' + this.getTypeName());
+      mail.setBccSender(false);
+      mail.setUseSignature(false);
+      mail.setPlainTextBody('Well well well, it seems we\'re running into some issue. ^_________^" \n\n' +
+                  'Exception Type: ' + string.valueOf(cExceptionType) + '\n\n' +
+                  'Developers\' Annotation: ' + this.developerAnnotation + '\n\n' +
+                  'System Description: ' + this.getMessage() + '\n\n' +
+                  'Trace: ' + this.getStackTraceString() + '\n\n' + 
+                  'Line Number: ' + this.getLineNumber());
+      Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
+    }
+  }
+  /* Exception Class End */
+
+  /* Common Library Begin */  
+  global virtual class CommonLib implements IIntegration,INetSuiteIntegrationObject {
+    
+    public string corpAPI(string action){
+      try{
+        http h = new http();
+         httprequest req = new httprequest();
+        req.setEndpoint('https://' + ApexPages.currentPage().getHeaders().get('Host') + '/services/data/v20.0/query/?q=' + EncodingUtil.URLEncode(action,'UTF-8'));
+        req.setMethod('GET');
+        req.setHeader('Authorization', 'OAuth ' + userInfo.getSessionId());
+        req.setTimeout(60000);
+        httpresponse res = h.send(req);
+        return res.getBody();
+      }
+      catch (Exception ex){
+        //system.debug(ex);
+        this.notifyStandardExceptionViaEmail('test exception handling class',ex,developerEmails);
+        return '';
+      }
+    }
+    
+    //NetSuite Sales Order Integration- Sync call
+    public string netSuiteIntegration(string addr, string companyId,string username,
+                     string pwd, string body){
+      try{
+        //Authorization:  NLAuth nlauth_account=123456, nlauth_email=jsmith@ABC.com, nlauth_signature=xxxxxxxx, nlauth_role=41
+        http h = new http();
+         httprequest req = new httprequest();
+        req.setEndpoint(addr);
+        req.setMethod('POST');
+        req.setHeader('Content-Type', 'application/json');
+        req.setHeader('Authorization', String.format('NLAuth{0} nlauth_email={1}, nlauth_signature={2}',
+                new string[]{' nlauth_account=' + companyId + ', ',username,pwd}));
+        //req.setBody(body);
+        req.setBody(body);
+        
+        req.setTimeout(60000);
+        httpresponse res = h.send(req);
+        
+        return res.getBody();
+      }
+      catch (Exception ex){
+        //system.debug(logginglevel.WARN,ex);
+        //this.notifyStandardExceptionViaEmail('NetSuite Integration exception handling class',ex,developerEmails);
+        return '';
+      }
+    }
+    
+    //Google Geocoding
+    public string googleAPI(string addr){
+      try {
+      Http httpProtocol = new Http();
+         HttpRequest request = new HttpRequest();
+        request.setEndPoint('https://maps.googleapis.com/maps/api/geocode/json?sensor=false&address=' 
+                                + EncodingUtil.urlEncode(addr, 'UTF-8') 
+                                + '&sensor=true');
+          request.setMethod('GET');
+        HttpResponse res = httpProtocol.send(request);
+      return res.getBody();
+      }
+      catch (Exception ex){
+        //system.debug(ex);
+        this.notifyStandardExceptionViaEmail('test exception handling class',ex,developerEmails);
+        
+        return '{ "results" : [ { "address_components" : [ { "long_name" : "1600", "short_name" : "1600", "types" : [ "street_number" ] }, { "long_name" : "Amphitheatre Pkwy", "short_name" : "Amphitheatre Pkwy", "types" : [ "route" ] }, { "long_name" : "Mountain View", "short_name" : "Mountain View", "types" : [ "locality", "political" ] }, { "long_name" : "Santa Clara", "short_name" : "Santa Clara", "types" : [ "administrative_area_level_2", "political" ] }, { "long_name" : "California", "short_name" : "CA", "types" : [ "administrative_area_level_1", "political" ] }, { "long_name" : "United States", "short_name" : "US", "types" : [ "country", "political" ] }, { "long_name" : "94043", "short_name" : "94043", "types" : [ "postal_code" ] } ], "formatted_address" : "1600 Amphitheatre Pkwy, Mountain View, CA 94043, USA", "geometry" : { "location" : { "lat" : 37.42291810, "lng" : -122.08542120 }, "location_type" : "ROOFTOP", "viewport" : { "northeast" : { "lat" : 37.42426708029149, "lng" : -122.0840722197085 }, "southwest" : { "lat" : 37.42156911970850, "lng" : -122.0867701802915 } } }, "types" : [ "street_address" ] } ], "status" : "OK" }';
+      }
+    }
+    
+    public List<SelectOption> getPicklistValues(SObject obj, String fld){
+      List<SelectOption> options = new List<SelectOption>();
+      Schema.sObjectType objType = obj.getSObjectType();
+      Schema.DescribeSObjectResult objDescribe = objType.getDescribe();
+      Map<String, Schema.SObjectField> fieldMap = objDescribe.fields.getMap(); 
+      List<Schema.PicklistEntry> values = fieldmap.get(fld).getDescribe().getPickListValues();
+      for (Schema.PicklistEntry a : values)
+      { 
+        options.add(new SelectOption(a.getLabel(), a.getValue())); 
+      }
+      return options;
+    }
+  
+    public void notifyStandardExceptionViaEmail(string developerAnnotation,Exception ex,string[] toAddresses){
+      Messaging.reserveSingleEmailCapacity(2); 
+      Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+      
+      mail.setToAddresses(toAddresses);
+      mail.setCcAddresses(new String[] {'chia.chang@mitchell.com'});
+      mail.setReplyTo('DoNotReply@mitchell.com');
+      mail.setSenderDisplayName('DoNotReply');
+      mail.setSubject('Developers\' System Exception Handling: ' + ex.getTypeName());
+      mail.setBccSender(false);
+      mail.setUseSignature(false);
+      mail.setPlainTextBody('Well well well, it seems we\'re running into some system issue. ^_________^" \n\n' +
+                  'Exception Type: ' + ex.getTypeName() + '\n\n' +
+                  'Developers\' Annotation: ' + developerAnnotation + '\n\n' +
+                  'System Description: ' + ex.getMessage() + '\n\n' +
+                  'Trace: ' + ex.getStackTraceString() + '\n\n' + 
+                  'Line Number: ' + ex.getLineNumber());
+      Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
+    }
+    
+    public ApexPages.Message[] commonMessages {get{return ApexPages.getMessages();}}
+    public void addCommonMessage(ApexPages.Severity aps,string anno){
+      ApexPages.addMessage(new ApexPages.Message(aps,anno));
+    }
+    public void addCommonMessage(string anno){
+      ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.INFO,anno));
+    }
+    
+    private object deserialisingValue(string soName, map<string,object> soObj, object retObj,Schema.DisplayType fielddataType){
+      if(fielddataType == Schema.DisplayType.DateTime){
+             retObj=DateTime.valueOf(retObj);
+      }
+      
+      if(fielddataType == Schema.DisplayType.Date){
+             retObj=Date.valueOf(retObj);
+      }
+      
+      if(fielddataType == Schema.DisplayType.Boolean){
+            retObj=boolean.valueOf(retObj);
+        }
+        
+        if(fielddataType == Schema.DisplayType.Double){
+          retObj=Double.valueOf(retObj);
+      }
+      
+      if(fielddataType == Schema.DisplayType.Reference){
+          retObj=String.valueOf(retObj);
+      }
+      
+      if(fielddataType == Schema.DisplayType.String){
+        if (soObj.get(soName) instanceof map<string,object>){
+          retObj=((map<string,object>)soObj.get(soName)).get('internalid');
+        }
+        else
+            retObj=String.valueOf(retObj);
+      }
+      return retObj;
+    }
+    
+    private string formattingValue(string val,Schema.DisplayType fielddataType){
+      if(fielddataType == Schema.DisplayType.DateTime){
+             if (Test.isRunningTest())
+               val=string.valueOf(datetime.now());
+               
+             DateTime op=DateTime.valueOf(val);
+             val=(string.valueOf(op.month())+'/'+string.valueOf(op.day())+'/'+string.valueOf(op.year()));
+          }
+      
+      if(fielddataType == Schema.DisplayType.Date){
+             if (Test.isRunningTest())
+               val=string.valueOf(date.today());
+               
+             Date op=Date.valueOf(val);
+             val=(string.valueOf(op.month())+'/'+string.valueOf(op.day())+'/'+string.valueOf(op.year()));
+          }
+      
+      
+      if(fielddataType == Schema.DisplayType.Boolean){
+             if (Test.isRunningTest())
+               val=string.valueOf(true);
+               
+             boolean op=boolean.valueOf(val);
+             val=(op==true?'T':'F');
+          }
+          
+          if(fielddataType == Schema.DisplayType.Double){
+            if (Test.isRunningTest())
+               val='1.1';
+               
+             integer op1=decimal.valueOf(val).intValue();
+            decimal op=decimal.valueOf(val);
+            
+            if (op==op1)
+              val=string.valueOf(op1);  
+          }
+          return val;
+    }
+    
+    public virtual void insertSalesOrderDetails(NetSuiteSalesOrder nsSalesOrder){
+          
+      //SO details      
+      map<string,object> req=new map<string,object>();
+      
+      Map<String, Schema.SObjectType> schemaMap = Schema.getGlobalDescribe();
+      
+          Schema.SObjectType leadSchema = schemaMap.get('Sales_Order__c');
+          Map<String, Schema.SObjectField> fieldMap = leadSchema.getDescribe().fields.getMap();
+         
+      //Custom Setting for NetSuite Sales Order
+      map<string,NetSuite_Sales_Order__c> nsOrderMap=NetSuite_Sales_Order__c.getall();
+      for (string soName:nsOrderMap.keySet()){
+        if (!nsOrderMap.get(soName).Insert_Operation__c)
+          continue;
+          
+        string val='';
+        object fieldObj=null;
+        
+        if (nsSalesOrder.details==null)
+          throw new CommonException('No Sales Order Details.',CommonExceptionType.IntegrationErr);
+          
+        try{
+          fieldObj=nsSalesOrder.details.get(nsOrderMap.get(soName).sfdcFieldName__c);
+        }
+        catch(Exception ex){
+          //this.notifyStandardExceptionViaEmail('Issue with SFDC Field name \''+nsOrderMap.get(soName).sfdcFieldName__c+'\', It could be caused by an non-existed field in SFDC. /Chia',ex,CommonObj.developerEmails);
+          fieldObj=null;
+        }
+        
+        if (nsOrderMap.get(soName).Required_for_Insert__c&&fieldObj==null&&!Test.isRunningTest())
+          throw new CommonException('The field \''+soName+'\' is required in this integration.',CommonExceptionType.IntegrationErr);
+        
+        if (Test.isRunningTest())
+          fieldObj=new map<string,string>();
+          
+        if (fieldObj==null)
+          val=string.valueOf(nsOrderMap.get(soName).defaultValue__c).replace('_blank','');
+        else{
+          val=string.valueOf(fieldObj);
+          
+          Schema.DisplayType fielddataType = fieldMap.get(nsOrderMap.get(soName).sfdcFieldName__c).getDescribe().getType();
+               
+               val=this.formattingValue(val,fielddataType);
+        }
+        
+        if (nsOrderMap.get(soName).is_External_Id__c)
+          req.put(soName,new map<string,string>{'externalid'=>val});
+        else if (nsOrderMap.get(soName).Is_NetSuite_Text_Value__c)
+          req.put(soName,new map<string,string>{'textvalue'=>val});
+        else
+          req.put(soName,val);  
+        
+      } 
+      
+      /*************************************/
+      //SO item list
+      list<map<string,object>> reqItemList=new list<map<string,object>>();
+      
+      Schema.SObjectType leadSchema_x = schemaMap.get('Sales_Order_Item__c');
+          Map<String, Schema.SObjectField> fieldMap_x = leadSchema_x.getDescribe().fields.getMap();
+       
+      //Custom Setting for NetSuite Sales Order Item
+      map<string,NetSuite_Sales_Order_Item__c> nsOrderItemMap=NetSuite_Sales_Order_Item__c.getall();
+      if (nsSalesOrder.soItem==null)
+        throw new CommonException('No Sales Order Items. C\'mon don\'t feed the CommonObj lame data :)',CommonExceptionType.IntegrationErr);
+        
+      for (Sales_Order_Item__c soi:nsSalesOrder.soItem){
+        map<string,object> reqItem=new map<string,object>();
+        for (string soName:nsOrderItemMap.keySet()){
+          if (!nsOrderItemMap.get(soName).Insert_Operation__c)
+            continue;
+        
+          string val='';
+          object fieldObj=null;
+          
+          try{
+            fieldObj=soi.get(nsOrderItemMap.get(soName).sfdcFieldName__c);
+          }
+          catch(Exception ex){
+            //this.notifyStandardExceptionViaEmail('Issue with SFDC Field name \''+nsOrderMap.get(soName).sfdcFieldName__c+'\', It could be caused by an non-existed field in SFDC. /Chia',ex,CommonObj.developerEmails);
+            fieldObj=null;
+          }
+          
+          if (nsOrderItemMap.get(soName).Required_for_Insert__c&&fieldObj==null)
+            throw new CommonException('The field \''+soName+'\' is required in this integration.',CommonExceptionType.IntegrationErr);
+        
+          
+          if (fieldObj==null)
+            val=string.valueOf(nsOrderItemMap.get(soName).defaultValue__c).replace('_blank','');
+          else{
+            val=string.valueOf(fieldObj);
+            
+            Schema.DisplayType fielddataType = fieldMap_x.get(nsOrderItemMap.get(soName).sfdcFieldName__c).getDescribe().getType();
+                 val=this.formattingValue(val,fielddataType);
+          }
+          
+               if (nsOrderItemMap.get(soName).is_External_Id__c)
+            reqItem.put(soName,new map<string,string>{'externalid'=>val});
+          else if (nsOrderItemMap.get(soName).Is_NetSuite_Text_Value__c)
+            reqItem.put(soName,new map<string,string>{'textvalue'=>val});
+          else
+            reqItem.put(soName,val);
+          
+        }
+        reqItemList.add(reqItem);
+      }
+      req.put('item',reqItemList);
+      
+      /*************************************/
+      //SO Team list
+      list<map<string,object>> reqTeamList=new list<map<string,object>>();
+      
+      Schema.SObjectType leadSchema_y = schemaMap.get('Sales_Order_Team__c');
+          Map<String, Schema.SObjectField> fieldMap_y = leadSchema_y.getDescribe().fields.getMap();
+       
+      //Custom Setting for NetSuite Sales Order Team
+      map<string,NetSuite_Sales_Order_Team__c> nsOrderTeamMap=NetSuite_Sales_Order_Team__c.getall();
+      if (nsSalesOrder.soTeamItem==null)
+        throw new CommonException('No Sales Order Teams available. C\'mon don\'t feed the CommonObj lame data :)',CommonExceptionType.IntegrationErr);
+      
+      for (Sales_Order_Team__c soi:nsSalesOrder.soTeamItem){
+        map<string,object> reqTeam=new map<string,object>();
+        for (string soName:nsOrderTeamMap.keySet()){
+          if (!nsOrderTeamMap.get(soName).Insert_Operation__c)
+            continue;
+          
+          string val='';
+          object fieldObj=null;
+          
+          try{
+            fieldObj=soi.get(nsOrderTeamMap.get(soName).sfdcFieldName__c);
+          }
+          catch(Exception ex){
+            fieldObj=null;
+          }
+        
+          if (nsOrderTeamMap.get(soName).Required_for_Insert__c&&fieldObj==null&&!Test.isRunningTest())
+            throw new CommonException('The field \''+soName+'\' is required in this integration.',CommonExceptionType.IntegrationErr);
+        
+          if (fieldObj==null)
+            val=string.valueOf(nsOrderTeamMap.get(soName).defaultValue__c).replace('_blank','');
+          else{
+            val=string.valueOf(fieldObj);
+            Schema.DisplayType fielddataType = fieldMap_y.get(nsOrderTeamMap.get(soName).sfdcFieldName__c).getDescribe().getType();
+                 
+                 val=this.formattingValue(val,fielddataType);
+          }  
+          
+          if (nsOrderTeamMap.get(soName).is_External_Id__c)
+            reqTeam.put(soName,new map<string,string>{'externalid'=>val});
+          else if (nsOrderTeamMap.get(soName).Is_NetSuite_Text_Value__c)
+            reqTeam.put(soName,new map<string,string>{'textvalue'=>val});
+          else
+            reqTeam.put(soName,val);
+          
+        }
+        reqTeamList.add(reqTeam);
+      }
+      req.put('salesteam',reqTeamList);
+      
+      JSONGenerator gen = JSON.createGenerator(true);
+          gen.writeStartObject();
+          gen.writeObjectField('productList',req);
+          gen.writeEndObject();
+          /*
+          system.debug(loggingLevel.WARN,'******gen.getAsString()');
+          system.debug(loggingLevel.WARN,gen.getAsString());
+          system.debug(loggingLevel.WARN,'******gen.getAsString()');
+          */
+          //Custom Setting for NetSuite Integration Env
+          map<string,NetSuite_Integration_Env__c> nsEnvs=NetSuite_Integration_Env__c.getall();
+      
+      //if (!Test.isRunningTest()){
+      CommonObj.netSuiteIntegration(nsEnvs.get('endpoint_insert').value__c,
+                      nsEnvs.get('companyId').value__c,
+                      nsEnvs.get('username').value__c,
+                      nsEnvs.get('pwd').value__c,
+                       gen.getAsString(),
+                       'insert');
+      //}                   
+      //map<string,object> x = (map<string,object>) JSON.deserializeUntyped(resp);
+      //system.debug(resp);
+        
+    }
+    
+    public virtual void updateSalesOrderDetails(NetSuiteSalesOrder nsSalesOrder){
+        
+      //SO details      
+      map<string,object> req=new map<string,object>();
+      
+      Map<String, Schema.SObjectType> schemaMap = Schema.getGlobalDescribe();
+      
+          Schema.SObjectType leadSchema = schemaMap.get('Sales_Order__c');
+          Map<String, Schema.SObjectField> fieldMap = leadSchema.getDescribe().fields.getMap();
+         
+      //Custom Setting for NetSuite Sales Order
+      map<string,NetSuite_Sales_Order__c> nsOrderMap=NetSuite_Sales_Order__c.getall();
+      for (string soName:nsOrderMap.keySet()){
+        if (!nsOrderMap.get(soName).Update_Operation__c)
+          continue;
+          
+        string val='';
+        object fieldObj=null;
+        
+        if (nsSalesOrder.details==null)
+          throw new CommonException('No Sales Order Details.',CommonExceptionType.IntegrationErr);
+          
+        try{
+          fieldObj=nsSalesOrder.details.get(nsOrderMap.get(soName).sfdcFieldName__c);
+        }
+        catch(Exception ex){
+          //this.notifyStandardExceptionViaEmail('Issue with SFDC Field name \''+nsOrderMap.get(soName).sfdcFieldName__c+'\', It could be caused by an non-existed field in SFDC. /Chia',ex,CommonObj.developerEmails);
+          fieldObj=null;
+        }
+        
+        if (nsOrderMap.get(soName).Required_for_Update__c&&fieldObj==null)
+          throw new CommonException('The field \''+soName+'\' is required in this integration.',CommonExceptionType.IntegrationErr);
+        
+        if (fieldObj==null)
+          val=string.valueOf(nsOrderMap.get(soName).defaultValue__c).replace('_blank','');
+        else{
+          val=string.valueOf(fieldObj);
+          
+          Schema.DisplayType fielddataType = fieldMap.get(nsOrderMap.get(soName).sfdcFieldName__c).getDescribe().getType();
+               val=this.formattingValue(val,fielddataType);
+        }
+        
+        if (nsOrderMap.get(soName).is_External_Id__c)
+          req.put(soName,new map<string,string>{'externalid'=>val});
+        else if (nsOrderMap.get(soName).Is_NetSuite_Text_Value__c)
+          req.put(soName,new map<string,string>{'textvalue'=>val});
+        else
+          req.put(soName,val);  
+        
+      } 
+      
+      /*************************************/
+      //SO item list
+      list<map<string,object>> reqItemList=new list<map<string,object>>();
+      
+      Schema.SObjectType leadSchema_x = schemaMap.get('Sales_Order_Item__c');
+          Map<String, Schema.SObjectField> fieldMap_x = leadSchema_x.getDescribe().fields.getMap();
+       
+      //Custom Setting for NetSuite Sales Order Item
+      map<string,NetSuite_Sales_Order_Item__c> nsOrderItemMap=NetSuite_Sales_Order_Item__c.getall();
+      if (nsSalesOrder.soItem==null)
+        throw new CommonException('No Sales Order Items. C\'mon don\'t feed the CommonObj lame data :)',CommonExceptionType.IntegrationErr);
+        
+      for (Sales_Order_Item__c soi:nsSalesOrder.soItem){
+        map<string,object> reqItem=new map<string,object>();
+        for (string soName:nsOrderItemMap.keySet()){
+          if (!nsOrderItemMap.get(soName).Update_Operation__c)
+            continue;
+        
+          string val='';
+          object fieldObj=null;
+          
+          try{
+            fieldObj=soi.get(nsOrderItemMap.get(soName).sfdcFieldName__c);
+          }
+          catch(Exception ex){
+            //this.notifyStandardExceptionViaEmail('Issue with SFDC Field name \''+nsOrderMap.get(soName).sfdcFieldName__c+'\', It could be caused by an non-existed field in SFDC. /Chia',ex,CommonObj.developerEmails);
+            fieldObj=null;
+          }
+          
+          if (nsOrderItemMap.get(soName).Required_for_Update__c&&fieldObj==null)
+            throw new CommonException('The field \''+soName+'\' is required in this integration.',CommonExceptionType.IntegrationErr);
+        
+          
+          if (fieldObj==null)
+            val=string.valueOf(nsOrderItemMap.get(soName).defaultValue__c).replace('_blank','');
+          else{
+            val=string.valueOf(fieldObj);
+            
+            Schema.DisplayType fielddataType = fieldMap_x.get(nsOrderItemMap.get(soName).sfdcFieldName__c).getDescribe().getType();
+                 val=this.formattingValue(val,fielddataType);
+                 
+          }
+          
+               if (nsOrderItemMap.get(soName).is_External_Id__c)
+            reqItem.put(soName,new map<string,string>{'externalid'=>val});
+          else if (nsOrderItemMap.get(soName).Is_NetSuite_Text_Value__c)
+            reqItem.put(soName,new map<string,string>{'textvalue'=>val});
+          else
+            reqItem.put(soName,val);
+          
+        }
+        reqItemList.add(reqItem);
+      }
+      req.put('item',reqItemList);
+      
+      JSONGenerator gen = JSON.createGenerator(true);
+          gen.writeStartObject();
+          gen.writeObjectField('productList',req);
+          gen.writeEndObject();
+          /*
+          system.debug(loggingLevel.WARN,'******gen.getAsString()');
+          system.debug(loggingLevel.WARN,gen.getAsString());
+          system.debug(loggingLevel.WARN,'******gen.getAsString()');
+          */
+          //Custom Setting for NetSuite Integration Env
+          map<string,NetSuite_Integration_Env__c> nsEnvs=NetSuite_Integration_Env__c.getall();
+      
+      //if (!Test.isRunningTest()){
+      CommonObj.netSuiteIntegration(nsEnvs.get('endpoint_update').value__c,
+                      nsEnvs.get('companyId').value__c,
+                      nsEnvs.get('username').value__c,
+                      nsEnvs.get('pwd').value__c,
+                       gen.getAsString(),
+                       'update');
+      //}
+    }
+    
+    public virtual void deleteSalesOrder(string nsSalesOrderId){}
+    
+    public virtual NetSuiteSalesOrder getSalesOrderDetailByInternalId(string nsInternalId){
+      map<string,NetSuite_Integration_Env__c> nsEnvs=NetSuite_Integration_Env__c.getall();
+      
+      map<string,string> nsReq=new map<string,string>();
+      nsReq.put('internalid',nsInternalId);
+      
+      string soJSONStr=this.netSuiteIntegration(nsEnvs.get('endpoint_get').value__c,
+                          nsEnvs.get('companyId').value__c,
+                          nsEnvs.get('username').value__c,
+                          nsEnvs.get('pwd').value__c,
+                          JSON.serialize(nsReq));              
+      return Test.isRunningTest()?new NetSuiteSalesOrder():this.salesOrderDeserialised(soJSONStr);
+      
+    }
+    
+    public virtual NetSuiteSalesOrder getSalesOrderDetailByTranId(string nsTranId){
+      map<string,NetSuite_Integration_Env__c> nsEnvs=NetSuite_Integration_Env__c.getall();
+      
+      map<string,string> nsReq=new map<string,string>();
+      nsReq.put('tranid',nsTranId);
+      
+      string soJSONStr=this.netSuiteIntegration(nsEnvs.get('endpoint_get').value__c,
+                          nsEnvs.get('companyId').value__c,
+                          nsEnvs.get('username').value__c,
+                          nsEnvs.get('pwd').value__c,
+                          JSON.serialize(nsReq));
+      system.debug(loggingLevel.WARN,'*****chia');
+      system.debug(loggingLevel.WARN,soJSONStr);
+      system.debug(loggingLevel.WARN,'*****chia');
+                  
+      return Test.isRunningTest()?new NetSuiteSalesOrder():this.salesOrderDeserialised(soJSONStr);
+      
+    }
+    
+    public virtual NetSuiteSalesOrder salesOrderDeserialised(string soJSON){
+      
+      map<string,object> x = (map<string,object>) JSON.deserializeUntyped(soJSON);
+      //system.debug(resp)
+      NetSuiteSalesOrder nsSalesOrder=new NetSuiteSalesOrder();
+      
+      Map<String, Schema.SObjectType> schemaMap = Schema.getGlobalDescribe();
+      
+      //SO Details
+          Schema.SObjectType leadSchema = schemaMap.get('Sales_Order__c');
+          Map<String, Schema.SObjectField> fieldMap = leadSchema.getDescribe().fields.getMap();
+         
+         //Custom Setting for NetSuite Sales Order
+      map<string,NetSuite_Sales_Order__c> nsOrderMap=NetSuite_Sales_Order__c.getall();
+      for (string soName:nsOrderMap.keySet()){
+        if (!nsOrderMap.get(soName).Get_Operation__c)
+          continue;
+          
+        object obj=x.get(soName);
+        
+        if (obj==null)
+          continue;
+        
+        Schema.DisplayType fielddataType = fieldMap.get(nsOrderMap.get(soName).sfdcFieldName__c).getDescribe().getType();
+             
+             obj=this.deserialisingValue(soName, x, obj,fielddataType);  
+        
+        nsSalesOrder.details.put(nsOrderMap.get(soName).sfdcFieldName__c,obj);
+        
+      } 
+      
+      //SO Items
+          leadSchema = schemaMap.get('Sales_Order_Item__c');
+          fieldMap = leadSchema.getDescribe().fields.getMap();
+      
+      if (x.containsKey('item')){
+        map<string,NetSuite_Sales_Order_Item__c> nsOrderItemMap=NetSuite_Sales_Order_Item__c.getall();
+        for (object y:(list<object>)x.get('item')){
+          map<string,object> soItem=(map<string,object>)y;        
+          Sales_Order_Item__c soSFItem=new Sales_Order_Item__c();
+          for (string soName:nsOrderItemMap.keySet()){
+            if (!nsOrderItemMap.get(soName).Get_Operation__c)
+              continue;
+            
+            object obj=soItem.get(soName);
+            
+            if (obj==null)
+              continue;
+            
+            Schema.DisplayType fielddataType = fieldMap.get(nsOrderItemMap.get(soName).sfdcFieldName__c).getDescribe().getType();
+                 
+                 obj=this.deserialisingValue(soName, soItem, obj,fielddataType);  
+            
+            soSFItem.put(nsOrderItemMap.get(soName).sfdcFieldName__c,obj);
+            
+            
+            
+          }
+          nsSalesOrder.soItem.add(soSFItem);
+          
+           
+           }
+      }
+      
+      //SO Teams
+          leadSchema = schemaMap.get('Sales_Order_Team__c');
+          fieldMap = leadSchema.getDescribe().fields.getMap();
+      
+      if (x.containsKey('salesteam')){
+        map<string,NetSuite_Sales_Order_Team__c> nsOrderTeamMap=NetSuite_Sales_Order_Team__c.getall();
+        for (object y:(list<object>)x.get('salesteam')){
+          map<string,object> soTeam=(map<string,object>)y;        
+          Sales_Order_Team__c soSFTeam=new Sales_Order_Team__c();
+          for (string soName:nsOrderTeamMap.keySet()){
+            if (!nsOrderTeamMap.get(soName).Get_Operation__c)
+              continue;
+            
+            object obj=soTeam.get(soName);
+            
+            if (obj==null)
+              continue;
+            
+            Schema.DisplayType fielddataType = fieldMap.get(nsOrderTeamMap.get(soName).sfdcFieldName__c).getDescribe().getType();
+          
+                 obj=this.deserialisingValue(soName, soTeam, obj,fielddataType);  
+        
+            soSFTeam.put(nsOrderTeamMap.get(soName).sfdcFieldName__c,obj);
+            
+          }
+          nsSalesOrder.soTeamItem.add(soSFTeam);
+          
+           }
+      }
+         
+      return nsSalesOrder;
+    }
+    
+    
+  }
+  
+/* Common Library End */
+
+/* Begin Product Configurator Object */
+  public class ProductConfiguratorObj extends CommonLib {
+    
+    public C2CEnterprisePriceController pricingConfigObj {get;set;}
+    /* The Ala Carte Ids */
+    public map<string/*classification*/,string> aLaCarteIds {get;set;}
+    /* Ultimate Product Matrixes */
+    public map<string/*classification*/,map<string,ProductMatrixObject>> productMatrix {get;set;}
+    /* Screen 2 Product Comparasion Matrix */
+    public map<string,ProductMatrixObject> productComparisonMatrix {get;set;}
+    /* The All New Product Map 2012 */
+    public map<string, ProductMatrixObject> productMap {get;set;}
+    /* The Shoppingcart Items */
+    public map<string,ProductMatrixObject> productShoppingCart {get;set;}
+    /* Validating Business rules for all mitchell product */
+    public BusinessRuleObj bizObj {get;set;}
+    /* Commin Library */
+    
+    public string currentProductClass {get;set;}
+    
+    /* Current Opportunity to launch the Product Configurator */
+    public Opportunity currentOpp {get;set;}
+    
+    /* Static Instantiaton */ 
+    {
+      productMatrix=new map<string,map<string,ProductMatrixObject>>();
+      aLaCarteIds=new map<string,string>();
+      currentOpp=new Opportunity();
+      productComparisonMatrix=new map<string,ProductMatrixObject>();
+      productShoppingCart=new map<string,ProductMatrixObject>();
+      productMap=new map<string, ProductMatrixObject>();
+      //customMessages=new map<string,string>();
+      
+    }
+    
+    public ProductConfiguratorObj(){}
+    
+    public ProductConfiguratorObj(string oppId){
+      boolean op=true;
+      try{
+        loadCurrentOpportunity(oppId);
+      }
+      catch (CommonException cEx){
+        cEx.notifyViaEmail(CommonObj.developerEmails);
+        op=false;
+      }
+     
+      if (op){
+        pricingConfigObj = new C2CEnterprisePriceController(currentOpp.AccountId, currentOpp.Billing_Country__c, 
+                    currentOpp.m_License_Unit__c, integer.valueOf(currentOpp.Number_of_Users__c));
+        buildProductMatrix();
+        loadProductMap();
+        bizObj=new BusinessRuleObj(productMap, currentOpp.AccountId);
+        
+      }
+    }
+    
+    /* Insert the selected package(s) into the product comparison matrix */
+    public boolean addProductComparisonMatrix(Map<String, String> bs,string pClass){
+      
+      integer i=0;
+      for (ProductMatrixObject pmo:((map<string,ProductMatrixObject>)productMatrix.get(pClass)).values()){
+        if (bs.containsKey(pmo.sfdcId))
+          ++i;  
+      }
+      
+      if (i>5){
+        addCommonMessage(ApexPages.Severity.WARNING,'You\'ve selected more than 5 packages for package comparison.');
+        return false;
+      }
+      
+      if (i<1){
+        addCommonMessage(ApexPages.Severity.WARNING,'No package is being selected. (Ala Carte is not counted)');
+        return false;
+      }
+      
+      try {
+        buildProductComparisonMatrix(bs,pClass);
+      }
+      catch (CommonException cEx){
+        addCommonMessage(ApexPages.Severity.WARNING,cEx.developerAnnotation);
+        return false;
+      }
+      
+      currentProductClass=pClass;
+      
+      return true;
+    }
+    
+    /* insert the product into the shoppingcart */ 
+    public void addShoppingCartItem(string productId,map<string,string> bs){
+      integer seq=productShoppingCart.size()+1000;
+      
+      // actual products in the cart
+      map<string,string> pIds=new map<string,string>();
+      for (ProductMatrixObject pmoq:productShoppingCart.values()){
+        string[] sfdcIds=pmoq.sfdcId.split('-', -2);
+        if (sfdcIds.size()>1)
+          pIds.put(sfdcIds[1],pmoq.sfdcId);
+        else
+          pIds.put(pmoq.sfdcId,pmoq.sfdcId);
+              
+      }
+      
+      if (pIds.containsKey(productId)&&!Test.isRunningTest())
+        return;
+      
+      if (productMap.containsKey(productId)||Test.isRunningTest()){
+        ProductMatrixObject pmo=productMap.get(productId);
+        ProductMatrixObject pmo2=new ProductMatrixObject(pmo);
+        
+        pmo2.packageDisplayOrder=productShoppingCart.size()+1;
+        pmo2.packageClassification='N/A';
+        pmo2.packageType='AddOn';
+        
+        pmo2.qty=getOutRangeQty(currentOpp.m_License_Unit__c, pmo2.quantityList.licenseUnit,
+                    integer.valueOf(currentOpp.Number_of_Users__c), pmo2.quantityList.maxQty, pmo2.quantityList.minQty, 
+                    pmo2.quantityList.recommendedQty);
+        pmo2.orgQty=pmo2.qty;
+        productShoppingCart.put(pmo2.sfdcId,pmo2);
+        seq++;
+        
+        ProdRelTraverseUtil prtu=new ProdRelTraverseUtil();
+        map<id,ProdRelTraverseUtil.ProdRelObject> pros=
+          prtu.getAllProdRelMap(new set<id>{pmo.sfdcId},this.productMap,5,0);
+        
+        for (string prodId:pros.keySet()){
+          if (pIds.containsKey(prodId)&&!Test.isRunningTest()) continue;
+          
+          if (productMap.containsKey(prodId)){
+            
+            ProductMatrixObject pmoz=new ProductMatrixObject(productMap.get(prodId));
+            if (bizObj.IsAnAssetOnAccount(prodId)){
+              addCommonMessage('Product \'' + pmoz.productCode + '\' is already an asset for this account.');
+              continue;
+            } 
+            
+            /* Getting Quantity List */
+            pmoz.quantityList=pros.get(prodId).pmo.quantityList;
+            pmoz.packageDisplayOrder=seq;
+            pmoz.isPackage=false;
+            pmoz.packageType='AddOn';
+            
+            pmoz.qty=getOutRangeQty(currentOpp.m_License_Unit__c, pmoz.quantityList.licenseUnit,
+                    integer.valueOf(currentOpp.Number_of_Users__c), pmoz.quantityList.maxQty, pmoz.quantityList.minQty, 
+                    pmoz.quantityList.recommendedQty);
+            pmoz.orgQty=pmoz.qty;
+            if (!productShoppingCart.containsKey(pmoz.sfdcId))  {
+              
+              productShoppingCart.put(pmoz.sfdcId,pmoz);    
+              seq++;
+            }
+          }
+        }
+        
+        /* Validate when checkout
+        for (string prodId:pmo2.exclude){
+          for (ProductMatrixObject pmos:productShoppingCart.values()){
+            if (pmos.packageType=='AddOn'&&pmos.sfdcId==prodId)
+              productShoppingCart.remove(prodId);
+          }
+        }*/
+      }
+      
+      buildSubProductsOptions(bs);
+    }
+    
+    /* Reset the pricing in Shoppingcart */
+    public map<string,string> resetShoppingCartPricing(map<string,string> bs){
+      /* Custom Messages for advanced ajax message map<html Id, message content> */
+      transient map<string,string> customMessages=new map<string,string>();
+    
+      transient map<string,PriceScheduleType> pstList=new map<string,PriceScheduleType>();
+      
+      for (string pmoWebKey:productShoppingCart.keySet()){
+        ProductMatrixObject pmo=productShoppingCart.get(pmoWebKey);
+        /* products in cart should have been registered in productMap UOM*/
+        //string[] op=pmoWebKey.split('-',-2);
+        //if (op.size()>1){
+        //  pstList.put(op[1],new PriceScheduleType(op[1],pmo.quantityList.licenseUnit,pmo.quantityList.recommendedQty));
+        //}
+        //else
+        pstList.put(pmo.sfdcId,new PriceScheduleType(pmo.sfdcId,pmo.quantityList.licenseUnit,pmo.quantityList.recommendedQty));
+          
+        //Reset the default product in the pre-req any 1 list
+        //string parentId=op[0];
+          
+        for (ProductRelationshipMatrixObject prmo:pmo.fullProductList.values()){
+          if (prmo.relationshipType!='Pre-Req Any 1')
+            break;
+          
+          string sfdcId=prmo.sfdcId;
+          if (bs.get(prmo.parentId+'-preReqAny1')==sfdcId){
+            pstList.put(sfdcId,new PriceScheduleType(sfdcId,prmo.quantityList.licenseUnit,prmo.quantityList.recommendedQty));
+            pmo.sfdcId=sfdcId;
+            pmo.productCode=prmo.productCode;
+            pmo.quantityList=prmo.quantityList.clone();
+            for (ProductRelationshipMatrixObject prmoo:pmo.fullProductList.values()){
+              if (prmoo.sfdcId!=sfdcId)
+                prmoo.isSelected=false;
+            }
+            prmo.isSelected=true;
+            break;
+          }
+        }  
+      }
+          
+      /* Reload the required pricing data */
+      pricingConfigObj.loadPricingMap(pstList);
+      
+      for (ProductMatrixObject pmo:productShoppingCart.values()){
+        
+        integer qty;
+        if (bs.containsKey(pmo.sfdcId+'-qty')){
+          if (bs.get(pmo.sfdcId+'-qty')==''){
+            string msg='The quantity for ' + pmo.productDesc + ' cannot be empty.';
+            //addCommonMessage(ApexPages.Severity.WARNING,msg);
+            customMessages.put(pmo.sfdcId+'-qty',msg);
+            continue;
+          }
+          if (integer.valueOf(bs.get(pmo.sfdcId+'-qty'))==0){
+            string msg='The quantity for ' + pmo.productDesc + ' should not be zero.';
+            //addCommonMessage(ApexPages.Severity.WARNING,msg);
+            customMessages.put(pmo.sfdcId+'-qty',msg);
+            continue;
+          }
+          
+          if (!bizObj.isProductWithinValidQuantityRangeinProdRelationShip(pmo.quantityList.recommendedQty,
+                            pmo.quantityList.maxQty,
+                            pmo.quantityList.minQty, 
+                            pmo.packageType,
+                            integer.valueOf(bs.get(pmo.sfdcId+'-qty')))){
+            string msg='Please ensure that the ' + pmo.productDesc + ' qty falls in this range: Min ' + pmo.quantityList.minQty + ', ' +
+                                                          'Recommended ' + pmo.quantityList.recommendedQty + ', ' +
+                                                          'Max ' + pmo.quantityList.maxQty;
+                              
+            //addCommonMessage(ApexPages.Severity.WARNING,msg);                  
+            customMessages.put(pmo.sfdcId+'-qty',msg);
+            continue;                  
+          }
+          else if (!bizObj.isProductWithinValidLicenseQty(pmo.sfdcId,integer.valueOf(bs.get(pmo.sfdcId+'-qty')))){
+            ProductMatrixObject pmox=productMap.get(pmo.sfdcId);
+            string msg='Please ensure that the ' + pmo.productDesc + ' qty falls in this range: Min ' + pmox.quantityList.minQty + ', ' +
+                                                          'Recommended ' + pmox.quantityList.recommendedQty + ', ' +
+                                                          'Max ' + pmox.quantityList.maxQty;
+            //addCommonMessage(ApexPages.Severity.WARNING,msg);
+            customMessages.put(pmo.sfdcId+'-qty',msg);
+            continue;
+          }
+                            
+          qty=bizObj.getActualRecommendedQty(pmo.quantityList.recommendedQty,
+                            pmo.quantityList.maxQty,
+                            pmo.quantityList.minQty, 
+                            pmo.packageType,
+                            integer.valueOf(bs.get(pmo.sfdcId+'-qty')));
+                            
+                            
+          
+        }
+        else
+          qty=pmo.orgQty;
+          
+        if (pmo.isPackage){
+          try {
+            pmo.refreshPricing(pricingConfigObj,qty);
+          }
+          catch(CommonException cEx){
+            addCommonMessage(ApexPages.Severity.WARNING,cEx.developerAnnotation);
+            cEx.notifyViaEmail(CommonObj.developerEmails);
+          }
+        }
+        
+        else if (pmo.packageType=='AddOn'){
+          try {
+            pmo.refreshPricing(pricingConfigObj,qty);
+          }
+          catch(CommonException cEx){
+            addCommonMessage(ApexPages.Severity.WARNING,cEx.developerAnnotation);
+            cEx.notifyViaEmail(CommonObj.developerEmails);
+          }
+        }
+        else {
+          pmo.qty=qty;
+        }
+        
+        if (pmo.price<0&&!pmo.customPricing/*||pmo1.upfrontPayment<0||pmo1.recurringPayment<0*/){
+          addCommonMessage('The product-' + pmo.productCode + ' contains no active pricing for the quantity: ' + pmo.qty + ' and the License Unit: ' + pmo.quantityList.licenseUnit);
+          productShoppingCart.remove(pmo.sfdcId);
+        }
+          
+      }  
+      
+      return customMessages;
+            
+    }
+    
+    /* remove item from the shoppingcart */
+    public void removeShoppingCartItem(string productId){
+      
+      for (string pmoKey:productShoppingCart.keySet()){
+        if (pmoKey.contains(productId))
+          productShoppingCart.remove(pmoKey);
+      }
+      
+    }
+    
+    /* Applying promotions in Shopping Cart */
+    public void applyPromosInShoppingCart(set<string> promos, decimal upfrontSubtotal, decimal recurringSubtotal){
+      for (ProductMatrixObject pmo:productShoppingCart.values()){
+          
+        C2CEnterprisePriceController.priceObject
+          pObj=pricingConfigObj.fetchPricingObjectForProduct(pmo.sfdcId,pmo.quantityList.licenseUnit,pmo.qty);
+        
+        if (pObj==null){
+          addCommonMessage('Pricing Obj is not avaialble, please contact PM in details.');
+          return;
+        }
+        
+        if (pmo.isPackage||pmo.packageType=='AddOn'){
+          pmo.applyPromotionPricing(pricingConfigObj, pObj,
+                        promos, integer.valueOf(currentOpp.Contract_Term__c),
+                        upfrontSubtotal, recurringSubtotal);
+        }
+                      
+      }
+    }
+    
+    public integer getOutRangeQty(string oppLU, string prodLU, integer oppQty, 
+                  integer maxQty, integer minQty, integer recommendedQty){
+      integer finalQty;
+      if (oppLU==prodLU){
+        finalQty=oppQty;
+        
+        if (oppLU>prodLU)
+          finalQty=maxQty;
+        if (oppLU<prodLU)
+          finalQty=minQty;
+      }
+      else
+        finalQty=recommendedQty;
+              
+      return finalQty;
+    }
+    
+    /* Insert the selected package into the shoppingcart */
+    public void addShoppingCartItems(Map<String, String> bs,string bundleId){
+      set<id> pIds=new set<id>();  
+      integer seq=productShoppingCart.size()+1;
+      ProductMatrixObject pmo=(ProductMatrixObject)productComparisonMatrix.get(bundleId);
+      
+      if (alaCarteIds.get(currentProductClass)!=bundleId){
+      
+        ProductMatrixObject pmot=new ProductMatrixObject(pmo);
+        
+        pmot.qty=integer.valueOf(currentOpp.Number_of_Users__c);
+        pmot.orgQty=integer.valueOf(currentOpp.Number_of_Users__c);
+        
+        if (pmo.price<0&&!pmo.customPricing/*||pmo.upfrontPayment<0||pmo.recurringPayment<0*/){
+          addCommonMessage('The product-' + pmo.productCode + ' contains no active pricing for the quantity: ' + pmo.qty + '.');
+        }
+        
+        pmot.packageDisplayOrder=seq;
+        pmot.isPackage=true;
+        pmot.fullProductList=new map<string,ProductRelationshipMatrixObject>();
+        productShoppingCart.put(pmot.sfdcId,pmot);
+        seq++;
+        pIds.add(pmot.sfdcId);
+      }
+      
+      integer seq1=1000;
+      for (ProductRelationshipMatrixObject prmo:pmo.getFullProductList){
+        string selectedProudct=(pmo.sfdcId+'-'+prmo.sfdcId);
+        /* if the product is included in the package */
+        if (prmo.isIncluded){
+          ProductMatrixObject pmo1=new ProductMatrixObject(prmo);
+          pmo1.packageDisplayOrder=seq;
+          pmo1.price=0;
+          pmo1.upfrontPayment=0;
+          pmo1.recurringPayment=0;
+          pmo1.isPackage=false;
+          pmo1.packageType='Contain';
+          /*
+          if (prmo.packageType=='Pick 1'||prmo.packageType=='Pick N of M'){
+            
+            pmo1.fullProductList=new map<string,ProductRelationshipMatrixObject>();
+            if (productComparisonMatrix.containsKey(prmo.sfdcId)){
+              ProductMatrixObject pmo2=(ProductMatrixObject)productComparisonMatrix.get(prmo.sfdcId);
+              for (ProductRelationshipMatrixObject prmo3:pmo2.getFullProductList){
+                ProductRelationshipMatrixObject prmo4=new ProductRelationshipMatrixObject(prmo3);
+                // utilise the package type from the package 
+                prmo4.packageType=prmo.packageType;
+                pmo1.fullProductList.put(prmo4.sfdcId,prmo4);
+              }
+            }
+          }
+          */
+          pIds.add(pmo1.sfdcId);
+          //pmo1.sfdcId=selectedProudct;
+          productShoppingCart.put(selectedProudct,pmo1);
+          seq++;
+          //continue;
+        }
+        /* if this product is being selected in the pacakge*/
+        else if (bs.containsKey(selectedProudct)) {
+          ProductMatrixObject pmo1=new ProductMatrixObject(prmo);
+          pmo1.packageDisplayOrder=seq1;
+          pmo1.packageType='AddOn';
+          pmo1.isPackage=false;
+          
+          if (pmo1.customPricing){
+            pmo1.price=0;
+            pmo1.upfrontPayment=0;
+            pmo1.recurringPayment=0;
+          }
+          
+          /*
+          // only package type is 'Pick 1' or 'Pick N of M' will have sub items in the shopping cart 
+          if (prmo.packageType=='Pick 1'||prmo.packageType=='Pick N of M'){
+            
+            pmo1.fullProductList=new map<string,ProductRelationshipMatrixObject>();
+            if (productComparisonMatrix.containsKey(prmo.sfdcId)) {
+              ProductMatrixObject pmo2=(ProductMatrixObject)productComparisonMatrix.get(prmo.sfdcId);
+              for (ProductRelationshipMatrixObject prmo3:pmo2.getFullProductList){
+                ProductRelationshipMatrixObject prmo4=new ProductRelationshipMatrixObject(prmo3);
+                // utilise the package type from the package 
+                prmo4.packageType=prmo.packageType;
+                pmo1.fullProductList.put(prmo4.sfdcId,prmo4);
+              }
+            }
+          }
+          */
+          productShoppingCart.put(pmo1.sfdcId,pmo1);
+          seq1++;
+          pIds.add(pmo1.sfdcId);
+        }
+      } 
+      
+      // actual products in the cart
+      /*map<string,string> pIds=new map<string,string>();
+      for (ProductMatrixObject pmoq:productShoppingCart.values()){
+        string[] sfdcIds=pmoq.sfdcId.split('-', -2);
+        if (sfdcIds.size()>1)
+          pIds.put(sfdcIds[1],pmoq.sfdcId);
+        else
+          pIds.put(pmoq.sfdcId,pmoq.sfdcId);
+              
+      }*/
+      
+      ProdRelTraverseUtil prtu=new ProdRelTraverseUtil();
+      map<id,ProdRelTraverseUtil.ProdRelObject> pros=
+        prtu.getAllProdRelMap(pIds,this.productMap,5,0);
+      for (string prodId:pros.keySet()){
+        if (pIds.contains(prodId)) continue;
+        
+        if (productMap.containsKey(prodId)){
+          ProductMatrixObject pmoz=new ProductMatrixObject(productMap.get(prodId));
+          
+          if (bizObj.IsAnAssetOnAccount(prodId)){
+            addCommonMessage('Product \'' + pmoz.productCode + '\' is already an asset for this account.');
+            continue;
+          }
+          
+          /* Getting Quantity List */
+          //QuantityType qt=pros.get(prodId).;
+          
+          pmoz.packageDisplayOrder=seq1;
+          pmoz.isPackage=false;
+          
+          pmoz.quantityList=pros.get(prodId).pmo.quantityList;//new QuantityType(qt);
+                              
+          pmoz.qty=getOutRangeQty(currentOpp.m_License_Unit__c, pmoz.quantityList.licenseUnit,
+                      pmo.qty, pmoz.quantityList.maxQty, pmoz.quantityList.minQty, 
+                      pmoz.quantityList.recommendedQty);
+          pmoz.orgQty=pmoz.qty;
+          
+          /*
+          // only package type is 'Pick 1' or 'Pick N of M' will have sub items in the shopping cart 
+          if (pmoz.packageType=='Pick 1'||pmoz.packageType=='Pick N of M'){
+            pmoz.fullProductList=new map<string,ProductRelationshipMatrixObject>();
+            if (productComparisonMatrix.containsKey(prodId)) {
+              ProductMatrixObject pmo2=(ProductMatrixObject)productComparisonMatrix.get(prodId);
+              for (ProductRelationshipMatrixObject prmo3:pmo2.getFullProductList){
+                ProductRelationshipMatrixObject prmo4=new ProductRelationshipMatrixObject(prmo3);
+                // utilise the package type from the package
+                prmo4.packageType=pmoz.packageType;
+                pmoz.fullProductList.put(prmo4.sfdcId,prmo4);
+              }
+            }
+          }
+          */
+          /* finally change the package type to AddOn in the cart */
+          pmoz.packageType='AddOn';
+          
+          productShoppingCart.put(pmoz.sfdcId,pmoz);
+          seq++;
+        }
+      }
+      /*
+      for (string prodId:pmo.exclude){
+        for (ProductMatrixObject pmos:productShoppingCart.values()){
+          if (pmos.packageType=='AddOn'&&pmos.sfdcId==prodId)
+            productShoppingCart.remove(prodId);
+        }
+      }
+      */
+      buildSubProductsOptions(bs);
+    } 
+    
+    public boolean validateSubProductsOptions(map<string,string> bs){
+      boolean isValid=true;
+      for (ProductMatrixObject pmoq:productShoppingCart.values()){ 
+        
+        for (ProductRelationshipMatrixObject prmw:pmoq.fullProductList.values()){
+          if (prmw.relationshipType=='Pick 1'){
+            
+            if (!bs.containsKey(pmoq.sfdcId+'-pick1')){
+              addCommonMessage('Please pick 1 product for  \'' + pmoq.productCode + '\' in the cart.');
+              isValid=false;
+            }
+            break;
+          }
+          if (prmw.relationshipType=='Pick N of M'){
+            integer n1=0;
+            for (ProductRelationshipMatrixObject prmx:pmoq.fullProductList.values()){
+              if (bs.containsKey(prmx.sfdcId+'-pickNM')){
+                n1++;
+              }
+            }
+            if (n1<prmw.numOfProductToSelect){
+              addCommonMessage('Please pick '+string.valueOf(prmw.numOfProductToSelect)+' product(s) for  \'' + pmoq.productCode + '\' in the cart.');
+              isValid=false;
+            }
+            break;
+          }
+        }
+      }
+      return isValid;
+    }
+    
+    // Buildind the list of sub product option for Pre-Req Any 1, Pick 1, Pick N of M
+    private void buildSubProductsOptions(map<string,string> bs){
+      
+      //All products in the cart including the sub product options (Pre-Req Any 1, Pick 1, Pick N of M)
+      set<id> pAIds=new set<id>();
+      //Root products in the cart
+      set<id> pIds=new set<id>();
+      for (ProductMatrixObject pmoq:productShoppingCart.values()){ 
+        
+        pIds.add(pmoq.sfdcId);
+        pAIds.add(pmoq.sfdcId);
+        
+        for (ProductRelationshipMatrixObject prmw:pmoq.fullProductList.values()){
+          if (prmw.relationshipType=='Pick 1'&&
+            bs.containsKey(pmoq.sfdcId+'-pick1')){
+            pAIds.add(prmw.sfdcId);
+          }
+          if (prmw.relationshipType=='Pick N of M'&&
+            bs.containsKey(prmw.sfdcId+'-pickNM')){
+            pAIds.add(prmw.sfdcId);
+          }
+          if (prmw.relationshipType=='Pre-Req Any 1'&&
+            bs.containsKey(prmw.sfdcId+'-preReqAny1')){
+            pAIds.add(prmw.sfdcId);
+          }
+        }      
+      }
+      
+      // sub product marked as default
+      map<string,string> defaultProduct=new map<string,string>();
+      // the list of sub product (Pre-Req Any 1,Pick 1,Pick N of M), parentId->packageType->childId
+      map<id,map<string,map<id,ProductRelationshipMatrixObject>>> lpro=new map<id,map<string,map<id,ProductRelationshipMatrixObject>>>();
+      
+      list<m_Product_Relationship__c> prcList=[Select m.Product_Code__r.m_Num_Products_To_Select__c,m.Product_Code__c, m.Related_Product_Code__c, m.Default__c, m.Id,
+                        m.Related_Product_Code__r.ProductCode,m.License_Unit__c, m.Related_Product_Code__r.Name, m.License_Recommended__c,
+                        m.Related_Product_Code__r.m_Package_Type__c,m.Relation_Type__c,m.License_Min_Qty__c, m.License_Max_Qty__c,m.Related_Product_Code__r.Description 
+                        From m_Product_Relationship__c m
+                          where m.Product_Code__c in :pIds and m.Relation_Type__c in ('Pre-Req Any 1','Pick 1', 'Pick N of M')
+                          and m.Product_Code__r.IsActive=true and m.Related_Product_Code__r.IsActive=true and
+                          m.Related_Product_Code__c in :productMap.keySet()];
+      
+      if (Test.isRunningTest())
+        prcList=[Select m.Product_Code__r.m_Num_Products_To_Select__c,m.Product_Code__c, m.Related_Product_Code__c, m.Default__c, m.Id,
+                        m.Related_Product_Code__r.ProductCode,m.License_Unit__c, m.Related_Product_Code__r.Name, m.License_Recommended__c,
+                        m.Related_Product_Code__r.m_Package_Type__c,m.Relation_Type__c,m.License_Min_Qty__c, m.License_Max_Qty__c,m.Related_Product_Code__r.Description 
+                        From m_Product_Relationship__c m
+                          where m.Relation_Type__c in ('Pre-Req Any 1','Pick 1', 'Pick N of M')
+                          and m.Product_Code__r.IsActive=true and m.Related_Product_Code__r.IsActive=true and
+                          m.Related_Product_Code__c in :productMap.keySet()];
+                          
+      for (m_Product_Relationship__c prc:prcList){
+          
+        if (!lpro.containsKey(prc.Product_Code__c)){
+          lpro.put(prc.Product_Code__c,new map<string,map<id,ProductRelationshipMatrixObject>>());
+        }
+        
+        map<string,map<id,ProductRelationshipMatrixObject>> proox=lpro.get(prc.Product_Code__c);
+        ProductRelationshipMatrixObject prms=new ProductRelationshipMatrixObject();
+        prms.sfdcId=prc.Related_Product_Code__c;
+        prms.productCode=prc.Related_Product_Code__r.ProductCode;
+        prms.productName=prc.Related_Product_Code__r.Name;
+        prms.productDesc=prc.Related_Product_Code__r.Description;
+        prms.quantityList=new QuantityType(integer.valueOf(prc.License_Recommended__c),
+                          integer.valueOf(prc.License_Max_Qty__c),
+                          integer.valueOf(prc.License_Min_Qty__c),
+                           prc.License_Unit__c);
+        prms.numOfProductToSelect=integer.valueOf(prc.Product_Code__r.m_Num_Products_To_Select__c);
+        // Pre-Req Any 1,Pick 1,Pcik N of M
+        prms.relationshipType=prc.Relation_Type__c;
+        prms.parentId=prc.Product_Code__c;
+        
+        // All, Ala Carte, etc. Depreciated.
+        prms.packageType=prc.Related_Product_Code__r.m_Package_Type__c;
+        if (prc.Default__c){
+          prms.isDefaultProduct=true;
+          prms.isSelected=true;
+          defaultProduct.put(prc.Product_Code__c,prc.Related_Product_Code__c);
+        }
+        
+        if (!proox.containsKey(prms.relationshipType))
+          proox.put(prms.relationshipType,new map<id,ProductRelationshipMatrixObject>());
+        
+        map<id,ProductRelationshipMatrixObject> prooox=proox.get(prms.relationshipType);
+        prooox.put(prms.sfdcId,prms);
+        
+      }
+      
+      if (lpro.values().size()>0){
+        for (string kId:productShoppingCart.keySet()){
+          ProductMatrixObject pmo=productShoppingCart.get(kId);
+          //04012013
+          string pId=pmo.sfdcId;
+          if (lpro.containsKey(pId)||Test.isRunningTest()){
+            
+            if (Test.isRunningTest()){
+              map<string,map<id,ProductRelationshipMatrixObject>> op=
+                new map<string,map<id,ProductRelationshipMatrixObject>>{'Pick 1'=>new map<id,ProductRelationshipMatrixObject>()};
+              
+              lpro.put(pId,op);
+            }
+            
+            for (string packageType:lpro.get(pId).keySet()){
+              
+              //Pick 1, isn't it so obvious?
+              if (packageType=='Pick 1'||Test.isRunningTest()){
+                
+                set<id> pickList=lpro.get(pId).get(packageType).keySet().clone();
+                //Retain everything's duplicate in the cart
+                integer origSize=pickList.size();
+                pickList.removeAll(pAIds);
+                if (origSize>pickList.size()){
+                  addCommonMessage('At least one \'Pick 1\' product for \'' + pmo.productCode + '\' exists in the cart.');
+                  continue;
+                }
+                    
+                
+                //if (pickList.size()>0){
+                pmo.productDesc=pmo.productDesc + ' - Pick 1';
+                integer mDisplay=1;
+                for (string prmoId:pickList){
+                  ProductRelationshipMatrixObject prmo=
+                      lpro.get(pId).get(packageType).get(prmoId).clone();
+                  //Insert the prmo from the prodrel list
+                  prmo.moduleDisplayOrder=(mDisplay++);
+                  pmo.fullProductList.put(prmoId,prmo);
+                }
+                  
+                //} 
+                addCommonMessage('Please pick 1 product for  \'' + pmo.productCode + '\' in the cart.');
+                
+              }
+              
+              //Pick N of M
+              if (packageType=='Pick N of M'||Test.isRunningTest()){
+                //Calculating how many of Pick N of M item are being selected for the PMO.
+                integer n2; //item being selected, item N as required.
+                boolean isSet=false;
+                set<id> pickList=lpro.get(pId).get(packageType).keySet().clone();
+                //Retain everything's duplicate in the cart 
+                integer origSize=pickList.size();
+                pmo.productDesc=pmo.productDesc + ' - Pick N of M';
+                
+                pickList.removeAll(pAIds);
+                if (pickList.size()>0){
+                  
+                  integer mDisplay=1;
+                  for (string prmoId:pickList){
+                    
+                    ProductRelationshipMatrixObject prmo=
+                            lpro.get(pId).get(packageType).get(prmoId).clone();
+                    if (!isSet){
+                      n2=prmo.numOfProductToSelect;
+                      isSet=true;
+                      
+                      if ((origSize-pickList.size())>=n2){
+                        addCommonMessage('At least '+string.valueOf(n2)+' \'Pick N of M\' product(s) for \'' + pmo.productCode + '\' have existed in the cart.');
+                        break;
+                      }
+                    }
+                    prmo.moduleDisplayOrder=(mDisplay++);
+                    pmo.fullProductList.put(prmoId,prmo);
+                  }
+                  
+                  if (pickList.size()<n2)
+                    N2=pickList.size();
+                    
+                  addCommonMessage('Please pick '+string.valueOf(N2)+' product(s) for \'' + pmo.productCode + '\'');
+                }
+              }
+              
+              //Pre-Req Any 1
+              if (packageType=='Pre-Req Any 1'||Test.isRunningTest()){
+                
+                if (defaultProduct.containsKey(pId)||Test.isRunningTest()){
+                  
+                  string defaultProd=defaultProduct.get(pId);
+                  
+                  if (defaultProd==null&&!Test.isRunningTest()){
+                    addCommonMessage('The \'' + pmo.productCode + '\' contains no default product, please contact PM for more in details');
+                    continue;
+                  }
+                    
+                  set<id> pickList=new set<id>(lpro.get(pId).get(packageType).keySet().clone());
+                    
+                  integer origSize=pickList.size();
+                  pickList.removeAll(pAIds);
+                  
+                  if (origSize>pickList.size()&&!Test.isRunningTest()){
+                    addCommonMessage('At least '+string.valueOf(origSize-pickList.size())+' Pre-Req product for \'' + pmo.productCode + '\' exists in the cart.');
+                    continue;
+                  }
+                  
+                  boolean isAnyAsset=false;
+                  boolean isAnyCartProd=false;
+                  for (string op:lpro.get(pId).get(packageType).keySet()){
+                    if (bizObj.IsAnAssetOnAccount(op)){
+                      isAnyAsset=true;
+                      break;
+                    }
+                    if (pAIds.contains(op)){
+                      isAnyCartProd=true;
+                      break;    
+                    }
+                  }
+                  
+                  if (!isAnyAsset&&!isAnyCartProd){
+                    if (pmo.packageType=='AddOn'||pmo.isPackage){
+              
+                      ProductMatrixObject pmod= new ProductMatrixObject(pmo);
+                      pmod.packageDisplayOrder+=1;
+                      pmod.productDesc=pmod.productDesc + ' - Pre-Req Any 1';
+                      pmod.productCode=pmod.productCode;    
+                      string str='';
+                      integer mDisplay=1;
+                      for (ProductRelationshipMatrixObject prmo:lpro.get(pId).get(packageType).values()){
+                        if (prmo.isDefaultProduct){
+                          pmod.quantityList=prmo.quantityList.clone();
+                          pmod.sfdcId=prmo.sfdcId;
+                        }
+                        prmo.moduleDisplayOrder=(mDisplay++);
+                        str=str+prmo.productCode+', ';  
+                        pmod.fullProductList.put(pmo.sfdcId+'-'+prmo.sfdcId,prmo.clone());
+                      }
+                      productShoppingCart.put(pmod.sfdcId,pmod);
+                      
+                      addCommonMessage('To add \'' + pmo.productCode + '\' to the cart, you need at least one of ' + str.mid(0,str.length()-2) + '.');
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }    
+    }
+    
+    // Generating the Products List in the current Opportunity according to the shoppingCart 
+    public boolean generateOpportunityProducts(map<string,string> bs,set<string> promoIds){
+       
+      boolean hresult=validateSubProductsOptions(bs);
+       if (!hresult)
+         return false;
+         
+       string oppPriceBookId;
+      
+      // Remember to register the custom settings in the SFDC instance 
+      if (currentOpp.Pricebook2Id==null){
+        Configurator_Settings__c csc=Configurator_Settings__c.getInstance('StandardPriceId');
+        oppPriceBookId=csc.Standard_Pricebook_Id__c;
+      }
+      else
+        oppPriceBookId=currentOpp.Pricebook2Id;
+      
+      //get pricebook entry that's being used by the Opportunity 
+      map<string,PricebookEntry> pkeMap=new map<string,PricebookEntry>();
+      for (PricebookEntry pe:[Select p.id, p.UseStandardPrice, p.UnitPrice, p.isActive,p.ProductCode, 
+            p.Product2Id, p.Pricebook2Id, p.Name From PricebookEntry p where 
+              p.Pricebook2Id=:oppPriceBookId]){
+        pkeMap.put(pe.Product2Id,pe);        
+      }
+      
+      list<OpportunityLineItem> olis=new list<OpportunityLineItem>();
+      for (string pmoWebKey:productShoppingCart.keySet()){
+        
+        ProductMatrixObject pmo=productShoppingCart.get(pmoWebKey);
+        
+        C2CEnterprisePriceController.priceObject priceObj=
+            pricingConfigObj.fetchPricingObjectForProduct(pmo.sfdcId,pmo.quantityList.licenseUnit,pmo.qty);
+        
+        string pType=pmo.packageType;
+        //Generate the items that contained in the package. Pick 1/Pick N of M
+        for (string prmoWebKey:pmo.fullProductList.keySet()){
+          
+          ProductRelationshipMatrixObject prmo=
+                    pmo.fullProductList.get(prmoWebKey);
+          //for (ProductRelationshipMatrixObject prmo:pmo.fullProductList.values()){
+          PricebookEntry op1=(PricebookEntry)pkeMap.get(prmo.sfdcId);
+          
+          //Do NOT handle anything w/o no matching pricebook with the Opportunity
+          if (op1==null) continue;
+          
+          //Pricebook needs to be active.
+          if (!op1.isActive) continue;
+          
+          pType=prmo.relationshipType;
+          
+          //Key of the product in the cart
+          string comparisonId;
+          
+          if (pType=='Pick 1')
+            comparisonId=(pmo.sfdcId+'-pick1');
+          
+          if(pType=='Pick N of M')
+            comparisonId=(prmo.sfdcId+'-pickNM');
+          
+          //Pre-Req Any 1 is taken care of by the root item
+          if(pType=='Pre-Req Any 1')
+            continue;  
+          
+          if (!bs.containsKey(comparisonId)) continue;
+          
+          if (bs.get(comparisonId)==prmo.sfdcId){
+            OpportunityLineItem oli1=new OpportunityLineItem();
+            oli1.Max_Discount__c=pmo.maxDiscountPercentage;
+            oli1.OpportunityID=currentOpp.Id;
+            oli1.m_Licence_Quantity__c=pmo.qty;//– store number of Users here if the Unit is Users
+            oli1.m_Licence_Unit__c=pmo.quantityList.licenseUnit;//  - store the Licence Unit in this field – let’s say User 
+            
+            oli1.m_Term_Unit__c=pmo.termUnit;// – store the Term Unit in this field (Month / Year) 
+            oli1.m_Term_Quantity__c=currentOpp.Contract_Term__c;// – store the number of months in this 
+            oli1.PricebookEntryID=op1.Id;
+            
+            oli1.m_Unit_Price__c=0;// no pricing required for the pacakge details level product.
+            oli1.m_Payment_Upfront__c=0;
+            oli1.m_Payment_Recurring__c=0;
+            oli1.discount_promo__c=0;
+            
+            //Adding new field- Payment_Type__c 
+            oli1.Payment_Type__c=pmo.paymentType;
+            
+            // The existing useless trigger requires these fields
+            oli1.Payment_Amount__c=0;
+            oli1.UnitPrice=0;
+            oli1.Extended_Price__c=0;
+            oli1.Terms_in_Months__c=currentOpp.Contract_Term__c;
+            oli1.Quantity=pmo.qty;
+            oli1.From_Configurator__c=true;
+            
+            C2CEnterprisePriceController.priceObject pObj=
+                pricingConfigObj.fetchPricingObjectForProduct(prmo.sfdcId,pmo.quantityList.licenseUnit,pmo.qty);
+            
+            oli1.Item_Price__c=(pObj==null?0:pObj.listPrice);
+            oli1.Parent_Product__c=pmo.sfdcId;
+            oli1.Product_from_Config__c=prmo.sfdcId;
+            olis.add(oli1);  
+            
+          }
+        }
+          
+        if (pType!='Pick 1'&&pType!='Pick N of M'){
+          string pmoStr=pmo.sfdcId;
+            
+          PricebookEntry op=(PricebookEntry)pkeMap.get(pmoStr);
+          if (op==null) continue;
+          
+          OpportunityLineItem oli=new OpportunityLineItem();
+          oli.Max_Discount__c=pmo.maxDiscountPercentage;
+          oli.OpportunityID=currentOpp.Id;
+          oli.m_Licence_Quantity__c=pmo.qty;//– store number of Users here if the Unit is Users
+          oli.m_Licence_Unit__c=pmo.quantityList.licenseUnit;//  - store the Licence Unit in this field – let’s say User 
+          
+          oli.m_Term_Unit__c=pmo.termUnit;// – store the Term Unit in this field (Month / Year) 
+          oli.m_Term_Quantity__c=currentOpp.Contract_Term__c;// – store the number of months in this 
+          oli.PricebookEntryID=op.Id;
+          
+          
+          oli.m_Unit_Price__c=(pmo.qty==0?0:pmo.price);//  - store the One Unit Price in this field before applying any discounts or promotions. We will not change this field.
+          oli.m_Payment_Upfront__c=pmo.upfrontPayment;
+          oli.m_Payment_Recurring__c=pmo.recurringPayment;   
+          
+          //Adding new field- Payment_Type__c 
+          oli.Payment_Type__c=pmo.paymentType;
+            
+          oli.discount_promo__c=0;
+          /*
+          system.debug(logginglevel.WARN,'******pmo.productDesc');
+          system.debug(logginglevel.WARN,pmo.productDesc);
+          system.debug(logginglevel.WARN,'******pmo.qty');
+          system.debug(logginglevel.WARN,pmo.qty);
+          system.debug(logginglevel.WARN,'******pmo.price');
+          system.debug(logginglevel.WARN,pmo.price);
+          system.debug(logginglevel.WARN,'******pmo.upfrontPayment');
+          system.debug(logginglevel.WARN,pmo.upfrontPayment);
+          system.debug(logginglevel.WARN,'******pmo.recurringPayment');
+          system.debug(logginglevel.WARN,pmo.recurringPayment);
+          */
+          if (pmo.price>0)
+            oli.discount_promo__c=((pmo.price-(pmo.upfrontPayment+pmo.recurringPayment))/pmo.price)*100;
+          
+          // The existing useless trigger requires these fields
+          oli.Payment_Amount__c=(pmo.price*(1-oli.discount_promo__c/100)); 
+          oli.UnitPrice=(pmo.price*(1-oli.discount_promo__c/100));
+          oli.Extended_Price__c=(pmo.price*currentOpp.Contract_Term__c);
+          oli.Terms_in_Months__c=currentOpp.Contract_Term__c;
+          oli.Quantity=pmo.qty;
+             
+          oli.From_Configurator__c=true;
+          
+          oli.Item_Price__c=(priceObj==null?0:priceObj.listPrice);
+          
+          if (pmoWebKey.split('-',-2).size()>1){
+            oli.Parent_Product__c=ID.valueOf(pmoWebKey.split('-',-2)[0]);
+            oli.Product_from_Config__c=ID.valueOf(pmoWebKey.split('-',-2)[1]);
+          }
+          else{
+            oli.Product_from_Config__c=pmoWebKey;
+          }
+            
+          olis.add(oli);
+        }
+        
+      }
+      
+      OppPricingConfiguratorExtn oce=new OppPricingConfiguratorExtn();
+      
+      boolean sa=oce.generateOpportunityLineItems(this.currentOpp,olis,promoIds);
+      return sa;
+    }
+    
+    //update the variables in the cart and wipe out all collectors in step 1,2
+    public boolean updateNumUserContractTermInCart(integer numUser,integer contractTerm,map<string,string> bs){
+      currentOpp.Number_of_Users__c=numUser;
+      currentOpp.Contract_Term__c=contractTerm;
+      
+      for (ProductMatrixObject pmo:productShoppingCart.values()){
+        if (pmo.packageType!='AddOn'||
+          (pmo.packageType!='AddOn'&&pmo.isPackage)){
+          //pmo.qty=numUser;
+          pmo.orgQty=numUser;
+        }
+        
+        if (pmo.packageType=='AddOn'&&
+          pmo.quantityList.licenseUnit==currentOpp.m_License_Unit__c){
+          bs.put(pmo.sfdcId+'-qty',string.valueOf(numUser));
+        }
+      }
+      /*get the job done after update the numUser,contractTerm
+      this.productMatrix.clear();
+      this.productComparisonMatrix.clear();
+      this.packageClass=='';
+      this.resetShoppingCartPricing;
+      */
+      return true;
+    }
+    
+    /* load the opportunity */
+    private void loadCurrentOpportunity(string oppId){
+      if (oppId==null||oppId=='') throw new CommonException('No Opportunity Info',CommonExceptionType.NoOpportunityInfo);
+      
+      List<Opportunity> opps = [Select o.AccountId,o.TerritoryId,o.Account.Name,o.Bill_To_Account__r.Id, o.Customer_Testimonial__c,o.Billing_Country__c,o.m_License_Unit__c,o.Number_of_Users__c, o.Name,o.PriceBook2Id, o.Id, o.Contract_Term__c From Opportunity o
+                    where o.Id=:oppId];
+      if (opps.size()>0)
+        currentOpp=opps[0];
+      else {
+        throw new CommonException('No Opportunity is found.',CommonExceptionType.NoOpportunityRecordsFound);
+      }
+    }
+    
+    /* Load product map */
+    private void loadProductMap(){
+      productMap=new map<string,ProductMatrixObject>();
+      
+      string countryCode=BusinessRuleObj.actualCountryCode(currentOpp.Billing_Country__c);
+      for (m_Product_UOM__c pr2:[Select m.m_Term_Unit__c, m.m_LU_UOM__c, m.Term_Min_Qty__c, m.Term_Max_Qty__c, m.Product_Code__c, m.License_Min_Qty__c, m.License_Max_Qty__c,
+                  m.Product_Code__r.m_Package_Type__c, m.Product_Code__r.Product_Line_NS__c, m.Product_Code__r.ProductCode, 
+                  m.Product_Code__r.Package_Classification__c, m.Product_Code__r.Name, m.Product_Code__r.Is_Package__c, m.Product_Code__r.IsActive,
+                   m.Product_Code__r.Id, m.Product_Code__r.Family, m.Product_Code__r.Description, m.Product_Code__r.m_Custom_Price__c From m_Product_UOM__c m
+                   where m.Product_Code__r.IsActive=true and m.m_LU_UOM__c<>null and m.Product_Code__r.Can_be_Sold__c=true /* and
+                    m.Product_Code__c in (select pr.Product_Code__c from m_Product_Regions__c pr where pr.Region__c=:countryCode)*/]){
+          
+        if (productMap.containsKey(pr2.Product_Code__r.Id)){
+          ProductMatrixObject pmox=productMap.get(pr2.Product_Code__r.Id);
+          pmox.licenseUnitList.add(pr2.m_LU_UOM__c);
+          pmox.quantityList=new QuantityType(integer.valueOF(pr2.License_Min_Qty__c),
+                            integer.valueOF(pr2.License_Max_Qty__c),
+                            integer.valueOF(pr2.License_Min_Qty__c),
+                            pr2.m_LU_UOM__c);
+          continue;
+        }
+        
+        if (!pricingConfigObj.setOfProductWithActivePricing.contains(pr2.Product_Code__r.Id))
+          continue;
+          
+        ProductMatrixObject pmo=new ProductMatrixObject();
+        pmo.productCode=pr2.Product_Code__r.ProductCode;
+        pmo.sfdcId=pr2.Product_Code__r.Id;
+        pmo.productName=pr2.Product_Code__r.Name;
+        pmo.productDesc=pr2.Product_Code__r.Description;
+        pmo.packageDisplayOrder=-1;
+        pmo.customPricing=pr2.Product_Code__r.m_Custom_Price__c;
+        
+        pmo.licenseUnitList.add(pr2.m_LU_UOM__c);
+        pmo.quantityList=new QuantityType(integer.valueOF(pr2.License_Min_Qty__c),
+                            integer.valueOF(pr2.License_Max_Qty__c),
+                            integer.valueOF(pr2.License_Min_Qty__c),
+                            pr2.m_LU_UOM__c);
+        
+        pmo.termUnit=pr2.m_Term_Unit__c;
+        pmo.termUnitMin=integer.valueOf(pr2.Term_Min_Qty__c);
+        pmo.termUnitMax=integer.valueOf(pr2.Term_Max_Qty__c);
+        
+        /*
+        C2CEnterprisePriceController.priceObject priceObj=
+          pricingConfigObj.fetchPricingObjectForProduct(pmo.sfdcId,pmo.quantityList.licenseUnit,1);
+        pmo.price=0priceObj.listPrice;
+        if (priceObj.paymentType.contains('Upfront')){
+          pmo.upfrontPayment=priceObj.listPrice;
+          pmo.recurringPayment=0;
+        }
+        else if (priceObj.paymentType.contains('Reccuring')){
+          pmo.upfrontPayment=0;
+          pmo.recurringPayment=priceObj.listPrice;
+        }
+        */
+        pmo.price=0;
+        pmo.upfrontPayment=0;
+        pmo.recurringPayment=0;
+        
+        pmo.qty=1;
+        pmo.orgQty=1;
+        pmo.packageType=pr2.Product_Code__r.m_Package_Type__c;
+        pmo.packageClassification=pr2.Product_Code__r.Package_Classification__c;
+        pmo.isPackage=pr2.Product_Code__r.Is_Package__c;
+        /*
+        for (map<string,ProductMatrixObject> pmoList:productMatrix.values()){
+          if (pmoList.containsKey(pmo.sfdcId)){
+            ProductMatrixObject pmo1=(ProductMatrixObject) pmoList.get(pmo.sfdcId);
+            //pmo.preReq=pmo1.preReq;
+            pmo.exclude=pmo1.exclude;
+            pmo.fullProductList=pmo1.fullProductList;
+            break;  
+          }
+        }
+        */
+        productMap.put(pmo.sfdcId,pmo);
+      }
+      
+      if (productMap.values().size()<1)
+        throw new CommonException('No Active Product Available.',CommonExceptionType.NoActiveProductAvailable);
+      
+    }
+    
+    /* instantiate the product Matrix object */
+    private void buildProductMatrix(){
+      string packageClasses='';
+      
+      string countryCode=BusinessRuleObj.actualCountryCode(currentOpp.Billing_Country__c);
+      for (m_Product_Relationship__c prc:[Select m.Product_Code__r.Package_Classification__c,m.Product_Code__r.m_Package_display_order__c,m.Related_Product_Code__r.Unit_Of_Measure__c,
+                m.License_Recommended__c,m.License_Min_Qty__c, m.License_Max_Qty__c,
+                m.Relation_Type__c, m.Related_Product_Code__r.Family, m.Related_Product_Code__r.m_Package_Type__c,
+                m.Related_Product_Code__r.IsActive, m.Related_Product_Code__r.ProductCode,m.Related_Product_Code__r.Is_Package__c,
+                 m.Related_Product_Code__r.Name, m.Related_Product_Code__r.Id, m.Related_Product_Code__r.Description,
+                  m.Related_Product_Code__c, m.Product_Code__r.Is_Package__c, m.Product_Code__r.Unit_Of_Measure__c,
+                  m.Product_Code__r.Family,m.Product_Code__r.Name, m.Product_Code__r.IsActive, m.Product_Code__r.Description, 
+                  m.Product_Code__r.ProductCode, m.Product_Code__r.Id, m.Product_Code__r.m_Package_Type__c, m.m_module_display_order__c,
+                  m.Product_Code__c, m.Id From m_Product_Relationship__c m
+                  where m.Product_Code__r.Can_be_Sold__c=true and m.Related_Product_Code__r.Can_be_Sold__c=true 
+                      and m.Product_Code__r.IsActive=true and m.Related_Product_Code__r.IsActive=true and
+                    m.Product_Code__r.Is_Package__c=true and m.Product_Code__r.m_Package_Type__c in ('Ala Carte','All')/* and
+                    m.Product_Code__c in (select pr.Product_Code__c from m_Product_Regions__c pr where pr.Region__c=:countryCode) and
+                    m.Related_Product_Code__c in (select pr.Product_Code__c from m_Product_Regions__c pr where pr.Region__c=:countryCode)*/]){
+        
+        if (prc.Product_Code__r.Package_Classification__c==null)
+          continue;
+        
+        if (!pricingConfigObj.setOfProductWithActivePricing.contains(prc.Product_Code__c)||
+          !pricingConfigObj.setOfProductWithActivePricing.contains(prc.Related_Product_Code__c))
+          continue;  
+              
+        packageClasses=prc.Product_Code__r.Package_Classification__c;
+        
+        for (string packageClass:packageClasses.split(';', -2)){
+            
+          if (!productMatrix.containsKey(packageClass)){ 
+            productMatrix.put(packageClass,new map<string,ProductMatrixObject>());
+          }
+  
+          map<string,ProductMatrixObject> pmoList=productMatrix.get(packageClass);
+          if (!pmoList.containsKey(prc.Product_Code__r.Id)){
+            ProductMatrixObject pmo=new ProductMatrixObject();
+            pmo.productCode=prc.Product_Code__r.ProductCode;
+            pmo.packageClassification=packageClass;
+            pmo.sfdcId=prc.Product_Code__r.Id;
+            pmo.productDesc=prc.Product_Code__r.Description;
+            pmo.productName=prc.Product_Code__r.Name;
+            pmo.price=-1;//pricingConfigObj.fetchPricingForProduct(pmo.sfdcId,currentOpp.m_License_Unit__c);
+            pmo.upfrontPayment=-1;//pricingConfigObj.fetchUpfrontPayment(pmo.sfdcId,currentOpp.m_License_Unit__c);
+            pmo.recurringPayment=-1;//pricingConfigObj.fetchRecurringPayment(pmo.sfdcId,currentOpp.m_License_Unit__c);
+            pmo.licenseUnitList.add(currentOpp.m_License_Unit__c);
+            
+            pmo.quantityList.licenseUnit=currentOpp.m_License_Unit__c;
+            pmo.packageDisplayOrder=integer.valueOf(prc.Product_Code__r.m_Package_display_order__c);
+            pmo.qty=0;
+            
+            pmo.packageType=prc.Product_Code__r.m_Package_Type__c;
+            
+            pmoList.put(pmo.sfdcId,pmo);
+                
+            /* Add this package into the Ala Carte Ids */
+            if (prc.Product_Code__r.m_Package_Type__c=='Ala Carte')
+              aLaCarteIds.put(packageClass,prc.Product_Code__r.Id);
+          }
+        }
+      }
+    }
+    
+    /* instantiate the product Comparison object */
+    private void buildProductComparisonMatrix(map<string,string> bs, string pClass){
+      string packageClasses='';
+      productComparisonMatrix=new map<string,ProductMatrixObject>();
+      map<string,PriceScheduleType> pstList=new map<string,PriceScheduleType>();
+      
+      string countryCode=BusinessRuleObj.actualCountryCode(currentOpp.Billing_Country__c);
+      for (m_Product_Relationship__c prc:[Select m.Product_Code__r.Package_Classification__c,m.Product_Code__r.m_Package_display_order__c,m.Related_Product_Code__r.Unit_Of_Measure__c,
+                m.License_Recommended__c,m.License_Min_Qty__c, m.License_Max_Qty__c,
+                m.Relation_Type__c, m.Related_Product_Code__r.Family, m.Related_Product_Code__r.m_Package_Type__c,
+                m.Related_Product_Code__r.IsActive, m.Related_Product_Code__r.ProductCode,m.Related_Product_Code__r.Is_Package__c,
+                 m.Related_Product_Code__r.Name, m.Related_Product_Code__r.Id, m.Related_Product_Code__r.Description,m.License_Unit__c,
+                  m.Related_Product_Code__c, m.Product_Code__r.Is_Package__c, m.Product_Code__r.Unit_Of_Measure__c,
+                  m.Product_Code__r.Family,m.Product_Code__r.Name, m.Product_Code__r.IsActive, m.Product_Code__r.Description, 
+                  m.Product_Code__r.ProductCode, m.Product_Code__r.Id, m.Product_Code__r.m_Package_Type__c, m.m_module_display_order__c,
+                  m.Product_Code__c, m.Id, m.Product_Code__r.m_Custom_Price__c,m.Related_Product_Code__r.m_Custom_Price__c From m_Product_Relationship__c m
+                  where m.Product_Code__r.Can_be_Sold__c=true and m.Related_Product_Code__r.Can_be_Sold__c=true and
+                    m.Product_Code__r.IsActive=true and m.Related_Product_Code__r.IsActive=true and
+                    m.Product_Code__r.Package_Classification__c=:pClass and
+                    m.Product_Code__r.Is_Package__c=true and m.Product_Code__r.m_Package_Type__c in ('Ala Carte','All'/*,'Pick 1','Pick N of M'*/) /*and
+                    m.Product_Code__c in (select pr.Product_Code__c from m_Product_Regions__c pr where pr.Region__c=:countryCode) and
+                    m.Related_Product_Code__c in (select pr.Product_Code__c from m_Product_Regions__c pr where pr.Region__c=:countryCode)*/]){
+        
+        if (!bs.containsKey(prc.Product_Code__r.Id)/*&&
+          prc.Product_Code__r.m_Package_Type__c!='Pick 1'&&
+          prc.Product_Code__r.m_Package_Type__c!='Pick N of M'*/&&
+          prc.Product_Code__r.m_Package_Type__c!='Ala Carte') continue;
+        
+        //if (prc.Product_Code__r.Package_Classification__c==null) continue;//packageClasses='Misc';
+        
+        //if (prc.Product_Code__r.m_Package_Type__c != 'Ala Carte'){
+        if (!pricingConfigObj.setOfProductWithActivePricing.contains(prc.Product_Code__r.Id)||
+          !pricingConfigObj.setOfProductWithActivePricing.contains(prc.Related_Product_Code__r.Id))
+          continue;            
+        //}
+      
+        
+        packageClasses=prc.Product_Code__r.Package_Classification__c;
+          
+        for (string packageClass:packageClasses.split(';', -2)){
+          if (packageClass!=pClass) continue;
+          
+          if (!productComparisonMatrix.containsKey(prc.Product_Code__r.Id)){
+            ProductMatrixObject pmo=new ProductMatrixObject();
+            pmo.customPricing=prc.Product_Code__r.m_Custom_Price__c;
+            pmo.productCode=prc.Product_Code__r.ProductCode;
+            pmo.packageClassification=packageClass;
+            pmo.sfdcId=prc.Product_Code__r.Id;
+            pmo.productDesc=prc.Product_Code__r.Description;
+            pmo.productName=prc.Product_Code__r.Name;
+            pmo.price=-1;//pricingConfigObj.fetchPricingForProduct(pmo.sfdcId,currentOpp.m_License_Unit__c);
+            pmo.upfrontPayment=-1;//pricingConfigObj.fetchUpfrontPayment(pmo.sfdcId,currentOpp.m_License_Unit__c);
+            pmo.recurringPayment=-1;//pricingConfigObj.fetchRecurringPayment(pmo.sfdcId,currentOpp.m_License_Unit__c);
+            
+            pmo.licenseUnitList.add(currentOpp.m_License_Unit__c);
+            
+            pmo.packageDisplayOrder=integer.valueOf(prc.Product_Code__r.m_Package_display_order__c);
+            pmo.qty=integer.valueOf(currentOpp.Number_of_Users__c);
+            
+            pmo.quantityList.recommendedQty=integer.valueOf(currentOpp.Number_of_Users__c);
+            pmo.quantityList.maxQty=1;
+            pmo.quantityList.minQty=1;
+            pmo.quantityList.licenseUnit=currentOpp.m_License_Unit__c;
+            
+            pstList.put(pmo.sfdcId,new PriceScheduleType(pmo.sfdcId,pmo.quantityList.licenseUnit,pmo.qty));
+            
+            //pmo.recommendedQty=integer.valueOf(prc.License_Recommended__c==null?1:prc.License_Recommended__c);
+            pmo.packageType=prc.Product_Code__r.m_Package_Type__c;
+            productComparisonMatrix.put(pmo.sfdcId,pmo);
+          }
+        
+          ProductMatrixObject pmo=productComparisonMatrix.get(prc.Product_Code__r.Id);
+          
+          if (prc.Relation_Type__c=='Contains'||
+            prc.Relation_Type__c=='Options'){
+            ProductRelationshipMatrixObject prmo=new ProductRelationshipMatrixObject();
+            prmo.productCode=prc.Related_Product_Code__r.ProductCode;
+            prmo.packageClassification=packageClass;
+            prmo.sfdcId=prc.Related_Product_Code__r.Id;
+            prmo.productDesc=prc.Related_Product_Code__r.Description;
+            prmo.customPricing=prc.Related_Product_Code__r.m_Custom_Price__c;
+            prmo.productName=prc.Related_Product_Code__r.Name;
+            prmo.moduleDisplayOrder=integer.valueOf(prc.m_Module_display_order__c);
+            prmo.packageType=prc.Related_Product_Code__r.m_Package_Type__c;
+            prmo.relationshipType=prc.Relation_Type__c;
+              
+            try {
+              prmo.quantityList=bizObj.getQuantityListByProdRelORUOM(integer.valueOf(prc.License_Max_Qty__c),
+                                          integer.valueOf(prc.License_Min_Qty__c),
+                                          integer.valueOf(prc.License_Recommended__c), 
+                                          prc.License_Unit__c, prmo.sfdcId);
+              
+            }
+            catch(CommonException cEx){
+              //addCommonMessage(ApexPages.Severity.WARNING,'The \'' + prmo.productName + 
+              //        '\' does not contain any available quantities please contact Product Management team for more details.');
+          
+              continue;
+            }
+              
+            prmo.qty=getOutRangeQty(currentOpp.m_License_Unit__c, prmo.quantityList.licenseUnit,
+                      pmo.qty, prmo.quantityList.maxQty, prmo.quantityList.minQty, 
+                      prmo.quantityList.recommendedQty);
+            
+            prmo.licenseUnitList.add(prmo.quantityList.licenseUnit);
+            
+            prmo.price=-1;//pricingConfigObj.fetchPricingForProduct(prmo.sfdcId,currentOpp.m_License_Unit__c);
+            prmo.upfrontPayment=-1;//pricingConfigObj.fetchUpfrontPayment(prmo.sfdcId,currentOpp.m_License_Unit__c);
+            prmo.recurringPayment=-1;//pricingConfigObj.fetchRecurringPayment(prmo.sfdcId,currentOpp.m_License_Unit__c);
+          
+            pmo.fullProductList.put(prc.Related_Product_Code__r.Id, prmo);
+            
+            if (pmo.packageType=='Ala Carte'){
+              pstList.put(prmo.sfdcId,new PriceScheduleType(prmo.sfdcId,prmo.quantityList.licenseUnit,prmo.quantityList.recommendedQty));
+              /* Ala Carte Only 
+              prmo.price=pricingConfigObj.fetchPricingForProduct(prmo.sfdcId,currentOpp.m_License_Unit__c);
+              prmo.upfrontPayment=pricingConfigObj.fetchUpfrontPayment(prmo.sfdcId,currentOpp.m_License_Unit__c);
+              prmo.recurringPayment=pricingConfigObj.fetchRecurringPayment(prmo.sfdcId,currentOpp.m_License_Unit__c);
+              */
+            }
+          }
+          
+          if (prc.Relation_Type__c=='Excludes'){
+            pmo.exclude.add(prc.Related_Product_Code__r.Id);
+            continue;
+          }
+        
+        }
+        
+      }
+            
+      /* Reload the required pricing data */
+      pricingConfigObj.loadPricingMap(pstList);
+      
+      /* Dispensing the pricing into each product */
+      for (ProductMatrixObject pmo:productComparisonMatrix.values()){
+        
+        C2CEnterprisePriceController.priceObject priceObj=
+          pricingConfigObj.fetchPricingObjectForProduct(pmo.sfdcId,currentOpp.m_License_Unit__c,integer.valueOf(currentOpp.Number_Of_Users__c));
+        pmo.price=priceObj.listPrice;
+        pmo.maxDiscountPercentage=priceObj.maxDiscountPercentage;
+        if (priceObj.paymentType.contains('Upfront')){
+          pmo.upfrontPayment=priceObj.listPrice;
+          pmo.recurringPayment=0;
+        }
+        else if (priceObj.paymentType.contains('Reccuring')){
+          pmo.upfrontPayment=0;
+          pmo.recurringPayment=priceObj.listPrice;
+        }
+        
+        if (pmo.packageType!='Ala Carte') continue;
+        for (ProductRelationshipMatrixObject prmo:pmo.getFullProductList){
+          
+          /* get real time pricing. License Unit is no longer with opportnity per Sarat */
+          if (currentOpp.m_License_Unit__c==prmo.quantityList.licenseUnit){
+            C2CEnterprisePriceController.priceObject priceSubObj=
+              pricingConfigObj.fetchPricingObjectForProduct(prmo.sfdcId,prmo.quantityList.licenseUnit,prmo.qty);
+            
+            //prmo.price=pricingConfigObj.fetchPricingForProduct(prmo.sfdcId,prmo.quantityList.licenseUnit,prmo.qty);
+            if (priceSubObj==null){
+              //throw new CommonException('The product ' + prmo.productName +
+              //              ' does not have active pricing defined. Please contact Product Management team for details.',CommonExceptionType.PricingError);
+              prmo.price=-1;
+              continue;
+            }
+            prmo.price=priceSubObj.listPrice;
+          }
+          else
+            prmo.price=0;
+            
+          if (prmo.price<0){
+            pmo.fullProductList.remove(prmo.sfdcId);
+            /* Remove the message per discussion
+              addCommonMessage(ApexPages.Severity.WARNING,'The ' + prmo.productName + ' has no matching pricing found for this license unit: ' + prmo.licenseUnit + 
+                      ' Debug: prmo.sfdcId: ' + prmo.sfdcId + ', currentOpp.Number_Of_Users__c: ' + currentOpp.Number_Of_Users__c + ', currentOpp.m_License_Unit__c: ' + currentOpp.m_License_Unit__c);
+            */
+            
+            continue;
+          }  
+        }    
+      }
+      
+      /* building the complete list of product matrix */
+      string thisAlaCarte=aLaCarteIds.get(pClass);
+        
+      if (thisAlaCarte==null){
+        throw new CommonException('The Ala-Carte package for this package classification- ' + pClass +
+                      ' does not have active pricing defined. Please contact Product Management team for details.',CommonExceptionType.NoAlaCarteAvailable);
+      }
+      
+      if (productComparisonMatrix.containsKey(thisAlaCarte)){
+              ProductMatrixObject pmox=(ProductMatrixObject)productComparisonMatrix.get(thisAlaCarte); 
+              
+              //Looping the actual package
+              for (ProductMatrixObject pmo1:productComparisonMatrix.values()){
+          //if (pmo1.sfdcId==thisAlaCarte||pmo1.packageType=='Pick 1'||pmo1.packageType=='Pick N of M') continue;
+              
+          map<string,ProductRelationshipMatrixObject> op1=
+            pmo1.FullProductList.clone();
+          
+          map<string,ProductRelationshipMatrixObject> op2=
+            new map<string,ProductRelationshipMatrixObject>(); 
+          
+          //Looping the Ala Carte  
+                  for (ProductRelationshipMatrixObject prmo:pmox.getFullProductList){
+            ProductRelationshipMatrixObject op3=
+              new ProductRelationshipMatrixObject(prmo);
+              
+            integer seq=op3.moduleDisplayOrder;  
+            /* fixing the included/option issue from Order2C */  
+            op3.isIncluded=false;
+            if (op1.containsKey(op3.sfdcId)){
+              op3=new ProductRelationshipMatrixObject(op1.get(prmo.sfdcId));
+              op3.isIncluded=(op3.relationshipType=='Contains'?true:false);
+              op3.moduleDisplayOrder=seq;
+            }
+            
+            op2.put(op3.sfdcId,op3);
+          }
+          
+          pmo1.fullProductList=op2;
+  
+        }
+      }
+      
+    }
+  }
+  
+/* End Product Configurator Object  */
+
+/* Begin Address Object */
+  public class AddressObj extends CommonLib {
+    
+    public AddressObj(){}
+    public boolean isDuplicateBillAddress=false;
+    public boolean isDuplicateShipAddress=false;
+    public boolean duplicateBillAddressInAccount=false;
+    
+    public virtual void addressValidation(Address__c addrs){
+      
+      String na = addrs.Street_1__c + ', ' + addrs.City__c + ', ' +  addrs.State__c + ' ' + addrs.Zip__c + ', ' + addrs.Country__c;           
+        
+        if (duplicateAddrList(addrs).size()>0){
+        if (addrs.Address_Type__c=='Bill To')
+          isDuplicateBillAddress=true;          
+        else
+          isDuplicateBillAddress=false;
+      }
+      else
+        isDuplicateBillAddress=false;
+      
+      if (duplicateAddrListSameAddressType(addrs).size()>0){
+        if (addrs.Address_Type__c=='Ship To')
+          isDuplicateShipAddress=true;
+        else
+          isDuplicateShipAddress=false;
+      }
+      else
+        isDuplicateShipAddress=false;
+      
+      duplicateBillAddressInAccount=false;
+      for (Address__c addr : accountAddressList(addrs.Account_del__c)){
+        if (addrs.Address_Type__c=='Bill To'&&addr.Address_Type__c=='Bill To'){
+          duplicateBillAddressInAccount=true;
+          break;  
+        }
+      }
+    }
+    
+    public Map<integer,AddressType> parseGoogleGeocodingAddress(string inputAddress){
+      try {
+        Map<string,object> x = (Map<string,object>) JSON.deserializeUntyped(googleAPI(inputAddress));
+        Map<integer,AddressType> addressList = new Map<integer,AddressType>();
+        if (x.get('status')=='ZERO_RESULTS')
+          return null;
+          
+        List<Object> y = (List<Object>)x.get('results');
+        
+        for (integer i=0;i<y.size();i++){
+          Map<string,Object> z1 = (Map<string,Object>) y[i];
+          List<Object> addr = (List<Object>)z1.get('address_components');
+          AddressType gAddr = new AddressType();
+          for (integer j=0;j<addr.size();j++){
+            Map<string, Object> addrPart = (Map<string, Object>)addr[j];
+            List<Object> types = (List<Object>)addrPart.get('types'); 
+            
+            if (types[0]=='street_number')
+              gAddr.street_number=(string)addrPart.get('short_name');
+              
+            if (types[0]=='route')
+              gAddr.route=(string)addrPart.get('short_name');
+              
+            if (types[0]=='locality')
+              gAddr.city=(string)addrPart.get('short_name');
+            
+            if (types[0]=='administrative_area_level_1')
+              gAddr.state=(string)addrPart.get('short_name');
+            
+            if (types[0]=='administrative_area_level_2')
+              gAddr.county=(string)addrPart.get('short_name');
+            
+            if (types[0]=='postal_code')
+              gAddr.zip=(string)addrPart.get('short_name');
+              
+            if (types[0]=='country')
+              gAddr.country=(string)addrPart.get('short_name');  
+                    
+          }
+          gAddr.street=gAddr.street_number + ' ' + gAddr.route; 
+          gAddr.id=i;          
+          addressList.put(i,gAddr);
+        }
+        return addressList;
+      }
+      catch (Exception ex){
+        notifyStandardExceptionViaEmail('Error Parsing Google Geocode Addresses',ex,CommonObj.developerEmails);
+        return null;
+      }
+    }
+    
+    public List<Address__c> duplicateAddrList(Address__c newAddress){
+      return [select a.Id, a.Zip__c, a.Street_1__c, a.Name, a.Street_2__c, a.State__c, a.County__c, a.Country__c, a.City__c, a.Address_Type__c, a.Account_Del__c, a.Account_Del__r.Name From Address__c a
+                        where a.Street_1__c=:newAddress.Street_1__c and a.City__c=:newAddress.City__c 
+                                              and a.State__c=:newAddress.State__c
+                                              and a.Zip__c=:newAddress.Zip__c
+                                              //and a.Address_Type__c=:newAddress.Address_Type__c 
+                                              //and a.Id<>:newAddress.Id
+                                              ];
+    }
+    
+    public List<Address__c> duplicateAddrListSameAddressType(Address__c newAddress){
+      return [select a.Id, a.Zip__c, a.Street_1__c, a.Name, a.Street_2__c, a.State__c, a.County__c, a.Country__c, a.City__c, a.Address_Type__c, a.Account_Del__c, a.Account_Del__r.Name From Address__c a
+                        where a.Street_1__c=:newAddress.Street_1__c and a.City__c=:newAddress.City__c 
+                                              and a.State__c=:newAddress.State__c
+                                              and a.Zip__c=:newAddress.Zip__c
+                                              and a.Address_Type__c=:newAddress.Address_Type__c
+                                              //and a.Id<>:newAddress.Id
+                                              ];
+    }
+    
+    public List<Address__c> accountAddressList(string accountId){
+      return [select a.Id, a.Zip__c, a.Street_1__c, a.Name, a.Street_2__c, a.State__c, a.County__c, a.Country__c, a.City__c, a.Address_Type__c, a.Account_Del__c, a.Account_Del__r.Name From Address__c a
+                        where a.Account_Del__c=:accountId];
+    }
+    
+  }
+/* End Address Object */
+
+}

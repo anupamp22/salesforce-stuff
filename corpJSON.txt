@@ -1,0 +1,1 @@
+<apex:page controller="corpJSONCtrl" action="{!query}" contentType="text/plain; charset=utf-8">{!result}</apex:page>

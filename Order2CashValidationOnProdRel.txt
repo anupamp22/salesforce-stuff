@@ -1,0 +1,44 @@
+/*****************************
+Author: Anupam Priyadarshi
+Title: Trigger for Product Relationships
+Description: Trigger for Product Relationships
+Ref#: 
+Open Issues (remove when resolved): N/A
+See test Method.
+Revision History: 
+03/20/2013 - Created
+04/03/2013 - Modified to constrain only product code and related product code
+04/11/2013 - Optimized the trigger, commented out some code
+*********************************/
+trigger Order2CashValidationOnProdRel on m_Product_Relationship__c (before update, before insert) {
+  
+    set<Id> relatedProductIds = new set<Id>();
+    set<Id> bottomUpTree = new set<Id>();
+    
+    /*for(m_Product_Relationship__c prel:trigger.new){
+      relatedProductIds.add(prel.Related_Product_code__c);        
+    }*/
+    //bottomUpTree = ProdRelTraverseUtil.buildBottomUpProdRelMap(relatedProductIds);
+    ProdRelTraverseUtil putil = new ProdRelTraverseUtil(true, false);
+    for(m_Product_Relationship__c prel:trigger.new){
+      boolean checkDependency = false;
+      if (trigger.isUpdate){
+        m_Product_Relationship__c oldPrel = trigger.oldMap.get(prel.id);
+        if (prel.Related_Product__c != oldPrel.Related_Product__c){
+          checkDependency = true;
+        }
+        
+      }
+      else if (trigger.isInsert){
+        checkDependency = true;
+      }      
+      
+      if (checkDependency){
+        putil.init(prel.Related_Product_code__c);
+        relatedProductIds.add(prel.Related_Product_code__c);
+        bottomUpTree = putil.getAllFlattenedTreeFromBottomUp(relatedProductIds, 5, 1);
+        if (bottomUpTree.contains(prel.Product_code__c)){prel.addError('Dependency already exists between these product codes.');}
+      }
+      
+    }
+}

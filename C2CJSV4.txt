@@ -1,0 +1,1110 @@
+/*
+ * Author: Chia Chang
+ * Developer: Chia Chang
+ * Copyright: Author for details.
+ * Title: JS Library for Order-2-Cash 
+ * Description:
+ * Calculating the pricing pricing and animating the GUI. 
+ * To read ths javascript library you need to understand the late-bounding techniques and
+ * static members usage across the application Cycle. 
+ * To self-improving, do NOT copy-paste people's work. 
+ * Creative is the key to the real engineering world.
+ * Thinking javascript is just nothing?! Well, you better think it again.
+ * Ref#: 3.1, MIT version.
+ * Licensing: Mitchell International. GPL is available in Git format via SVN. Ask Chia for details.
+ * Open Issues (remove when resolved): N/A
+ * Usage: See Chrome Developer tools or Firebug for Firefox or IE Developer Console.
+ * API Version: jQuery library 1.7.2, update is required.
+ * Revisions' History:
+ * 10.12.2012- Add Calculator tools.
+ * 11.09.2012- Add Page blocks for the Search panel.
+ * 12.02.2012- Create Freezing Pane structure.
+ * 01.03.2013- Fix window event listener, ignore any unrelated characters
+ * 01.07.2013- Adding cometd to bridge sfdc streaming api 
+ * 04.17.2013- changing project code from streamapi to quartet
+ */
+
+$j = jQuery;
+$j.noConflict();
+
+/* chia's utility object */
+var app = {blockObj: function(){return $j('#formBlock');},
+			getURLStr:
+				function(param) {
+				    var val = document.URL;
+				    var url = val.substr(val.indexOf(param))  
+				    var n=url.replace(param+"=","");
+				    return n; 
+				},
+			calculationBlockObj: function(){return $j('#formCalculationBlock');},
+			nsBlockObj: function(){return $j('#nsBlock');},
+			nsPageObj: function(){return $j('#nsPageBlock');},
+			nsPageContent: function(){return $j('#nsPageContent')},
+			nsRspObj: [],
+			searchPadObj: function(){return $j('#searchPad');},
+			searchPadContentObj: function(){return $j('#searchContentPad');},
+			/*searchPadContentBlockObj: function(){return $j('#formSearchPadBlock');},*/
+			ver: '- 2013 Spring EBT CRM Team Project Order-2-Cash v2.4.10.quartet',
+			sfdcAPISessionId: '',
+			/* /topic/OpportunityUpdateV1 */
+			sfdcStreamingChannel1: '/topic/PricingScheduleUpdateV2',
+			sfdcStreamingChannel2: '/topic/OpportunityUpdateV1',
+			//timer: [0,0,0,0,0,0,0],
+			/* Preventing a click-away caused by the Enter key */
+			enterKeyTrigger: function(evt){
+				if (window.event&&window.event.keyCode==13||evt.which==13){
+					app.blockObj().fadeIn(500);
+					displaySearchDetails('true');
+					return false;
+				}
+			},
+			enterKeyReCalculating: function(obj,evt,type){
+				
+				if (window.event&&window.event.keyCode==13||evt.which==13){
+					var str=/^\d+$/;
+					var pp=$j(obj).val();
+					switch(type){
+						case 'quantity':
+							str=/^\d+$/;
+							break;
+						case 'currency':
+							//str=/^\d+\.\d{1,2}$/;
+							str=/^\s*(\+|-)?((\d+(\.\d\d)?)|(\.\d\d))\s*$/;
+							break;
+						case 'numUserContractTerm':
+							str=/^\d+$/;
+							break;
+						
+					}
+					
+					if(str.test(pp)){
+						$j('input[type=text]').each(function(){$j(this).poshytip('hide');});
+						app.blockObj().fadeIn(500);
+						$j(obj).blur();
+						switch(type){
+							case 'quantity':
+								reCalculatePricing();
+								break;
+							case 'currency':
+								reCalculatePricing();
+								break;
+							case 'numUserContractTerm':
+								updateNumUserContractTermInCart();
+								break;
+							
+						}
+					}
+					return false;
+					
+				}
+				
+				return true;
+				/*
+				
+				if (window.event&&window.event.keyCode==46||evt.which==46){
+					if (pp=='')	{
+						$j('input[type=text]').each(function(){$j(this).poshytip('hide');});
+						return false;
+					}
+					else {
+						if (pp.indexOf('.')>-1)
+							pp=pp.substring(0,pp.indexOf('.')-1);
+						
+						pp+='.00';
+						$j(obj).val(pp);
+						return false;
+					}
+				}
+				
+				if (window.event&&window.event.keyCode==13|evt.which==13){
+					if (pp=='')	{
+						$j('input[type=text]').each(function(){$j(this).poshytip('hide');});
+						return false;
+					}
+				}
+				
+				//pp+=String.fromCharCode(window.event.keyCode);
+				
+				//if (!str.test(pp))
+				//	return false;
+				if (window.event.keyCode>=48&&window.event.keyCode<=57)				
+					return true;
+				else
+					return false;
+				*/
+				
+			},
+			validateTheCart: function(){
+				/*var str=/^\d+$/;
+				var reslt=true;
+				$j('input[type=text]').each(function(){
+					var pp=$j(obj).val();
+					if(!str.test(pp)){
+						var myObject = new Object();
+						myObject.name = "John";
+						myObject.age = 12;
+						myObject.pets = ["cat", "dog"];
+						Afterwards stringify it via:
+						
+						var myString = JSON.stringify(myObject);
+						reslt=false;
+					}
+				});
+				
+				return reslt;*/
+			},
+			//Depleted
+			onBlurReCulculating: function(obj,evt){
+				/*var str=/^\d+$/;
+				var pp=$j(obj).val();
+				if(str.test(pp)){
+						app.blockObj().fadeIn(500);
+						reCalculatePricing();
+						return false;
+				}	
+				
+				return true;
+				*/
+			},
+			ChiaPaneOffsetTopPx: 0,			
+			/* Here comes how Chia freezes the head panel */
+			freezeChiaPane:	function(){
+				if ($j('.caption_column')!=null&&
+						$j('.tsc_pricingtable03.tsc_pt3_style1')!=null){
+							
+					var mbt=$j('.caption_column').offset().top;
+					
+					opColumn0=generatingFreezedColumns($j('.caption_column'));
+					opColumn1=generatingFreezedColumns($j('.column_1'));
+					opColumn2=generatingFreezedColumns($j('.column_2'));
+					opColumn3=generatingFreezedColumns($j('.column_3'));
+					opColumn4=generatingFreezedColumns($j('.column_4'))
+					opColumn5=generatingFreezedColumns($j('.column_5'));
+					opColumn6=generatingFreezedColumns($j('.column_6'));
+					opColumn7=generatingFreezedColumns($j('.column_7'));
+					
+					var mbl0=getLeftPx($j('.caption_column'));
+					var mbl1=getLeftPx($j('.column_1'));
+					var mbl2=getLeftPx($j('.column_2'));
+					var mbl3=getLeftPx($j('.column_3'));
+					var mbl4=getLeftPx($j('.column_4'));
+					var mbl5=getLeftPx($j('.column_5'));
+					var mbl6=getLeftPx($j('.column_6'));
+					var mbl7=getLeftPx($j('.column_7'));
+					
+					$j(window).scroll(function (){
+						
+						var op=$j(window).scrollTop();
+						//alert(op);
+						displayFreezedColumn(opColumn0,mbt+app.ChiaPaneOffsetTopPx,op,mbl0);
+						displayFreezedColumn(opColumn1,mbt+app.ChiaPaneOffsetTopPx,op,mbl1);
+						displayFreezedColumn(opColumn2,mbt+app.ChiaPaneOffsetTopPx,op,mbl2);
+						displayFreezedColumn(opColumn3,mbt+app.ChiaPaneOffsetTopPx,op,mbl3);
+						displayFreezedColumn(opColumn4,mbt+app.ChiaPaneOffsetTopPx,op,mbl4);
+						displayFreezedColumn(opColumn5,mbt+app.ChiaPaneOffsetTopPx,op,mbl5);
+						displayFreezedColumn(opColumn6,mbt+app.ChiaPaneOffsetTopPx,op,mbl6);
+						displayFreezedColumn(opColumn7,mbt+app.ChiaPaneOffsetTopPx,op,mbl7);
+						
+				    });
+				}
+			},
+			postCustomMessages: function(msg){
+				var obj = $j.parseJSON(msg);
+				//obj.messages
+				for(var item in obj.messages) {
+					//alert(item + ': ' + obj.messages[item]);
+					var jqObj=$j('#'+item);
+					//jqObj.poshytip('hide');
+					jqObj.poshytip({
+						className : 'tip-darkgray',
+						content : obj.messages[item],
+						showOn : 'none',
+						alignTo : 'target',
+						alignX : 'inner-left',
+						//alignY : 'center',
+						//offsetX : 100,
+						offsetX: 0,
+						offsetY: 5,
+						showAniDuration : 1000
+					}).poshytip('show');
+					
+					jqObj.focus(function(){$j(this).poshytip('hide');});
+				}
+			},
+			postStreamingMessage: function(msg){
+				$j('#streamingMsg').slideUp('slow',
+					function(){
+						$j('#streamingMsg').html(msg);
+						t1=setInterval(function(){$j('#streamingMsg').slideDown('slow',
+							function(){
+								clearInterval(t1);
+								t1=setInterval(function(){
+									clearInterval(t1);
+									$j('#streamingMsg').slideUp('slow');	
+								},7000);
+						});},1000);
+					});
+				//$j('#streamingMsg').slideDown('slow',
+				
+			},
+			netSuiteGenerateSalesOrder: function(remoteStr) {
+        		
+        		Visualforce.remoting.Manager.invokeAction(
+           		 	remoteStr,
+           			'https://rest.sandbox.netsuite.com/app/site/hosting/restlet.nl?script=192&deploy=1',
+           			'1043917',
+           			'sfdc.ns@mitchell.com',
+           			'netsuite123',
+           			app.netSuiteGenerateRequest(),
+            		function(result, event){
+		                if (event.status) {
+		                	var decoded = $j('<div/>').html(result).text();
+		                	$j('#nsRpsTable').show();
+		                	app.nsRspObj=$j.parseJSON(decoded);
+		                	if ($j('#nsRpsTable').children().length<0){
+		                		$j('#nsRpsTable').append('<tr><td>bill</td><td>ship</td><td>tranId</td><td>createDate</td></tr>');
+		                	}
+		                	$j('#nsRpsTable').append('<tr><td>'+ app.nsRspObj.entity.name +'</td><td>'+ app.nsRspObj.shipaddress +'</td><td>'+ app.nsRspObj.tranid +'</td><td>'+ app.nsRspObj.createddate +'</td></tr>');
+		                	
+		                	//t be continue;
+		                	console.log(decoded);
+		                } else if (event.type === 'exception') {
+		                	var decoded = $j('<div/>').html(event.message).text();
+		                	var decodedw = $j('<div/>').html(event.where).text();
+		                	
+		                	console.log(decoded + '\n\n' + decodedw);
+		                } else {
+		                	var decoded = $j('<div/>').html(event.message).text();
+		                	
+		                    console.log(decoded);
+		                }
+           			},
+           			{escape: true}
+           		);
+    		},
+    		netSuiteIntegrationPoC:
+			function(){
+				
+				/*
+				Good design 
+				*/ 
+				app.nsBlockObj().show();
+				app.nsPageObj().show().animate({left:35,top:20,width:$j(document).width()-70,height:$j(window).height()-100}, 500);
+				app.nsPageContent().height($j(window).height());
+				
+			},
+			netSuiteGenerateRequest: 
+			function(){
+   				var op=[];
+   				/*
+   				op.push({recordtype:'salesorder',
+						   entityid:'',
+						   companyname:'',
+						   subsidiary:'',
+						   email:''});
+   				*/
+   				op.push({recordtype:'customer',
+   						entityid:'Chia Chang',
+   						companyname:'International, Inc.',
+   						subsidiary:'1',
+   						email:'chia.chang@mitchell.com'});
+   				/*
+   				return '{"recordtype":"customer",' + 
+   						'"entityid":"Chia Chang RESTlet Integration",' +
+   						'"companyname":"Yasuda Chia RESTlet, Inc.",' +
+   						'"subsidiary":"1",' +
+   						'"email":"chia.chang@mitchell.com",' +
+   						'"custentity_sfns_link_id":"chia_test_sfdcId",' +
+   						'"category":"24"}';
+   				*/
+   				return '{"recordtype":"salesorder",' + 
+					   '"customForm":"' + $j('#inputCustomForm').val() + '",' +
+						'"entity":"' + $j('#inputEntity').val() + '",' +
+						'"tranDate":"' + $j('#inputTranDate').val() + '",' +
+						'"orderStatus":"' + $j('#inputOrderStatus').val() + '",' +
+						'"salesEffectiveDate":"' + $j('#inputSalesEffectiveDate').val() + '",' +
+						'"excludeCommission":"' + $j('#inputExcludeCommision').val() + '",' +
+						'"shipMethod":"' + $j('#inputShipMethod').val() + '",' +
+						'"status":"_pendingApproval",' +
+						'"custbody_mi_type_of_order":"3",' +
+						'"custbody_mi_contract_term":"12",' +
+						'"custbody_mi_renewal_type":"3",' +
+						'"custbody_mi_contract_start_date":"3/6/2013",' +
+						'"custbody_mi_contract_end_date":"3/6/2014",' +
+						'"custbody_mi_ship_to_customer":"109532",' +
+						//'"custbody_mi_contract_type}":"3"}';
+						'"custbody_mi_contract_type":"3",' +
+						'"item":' +
+						'[' +
+						'{' +
+						'"item":"' + $j('#inputItem').val() + '",' +
+						'"quantity":"' + $j('#inputQuantity').val() + '",' +
+						'"price":"' + $j('#inputPrice').val() + '",' +
+						'"rate":"' + $j('#inputRate').val() + '",' +
+						'"revRecStartDate":"3/6/2013",' +
+						'"revRecEndDate":"3/6/2014",' +
+						'"custcol_mi_list_price":"25",' +
+						'"custcol_mi_contract_term_months":"12",' +
+						'"custcol_mi_contract_line_start_date":"3/6/2013",' +
+						'"custcol_mi_contract_line_end_date":"3/6/2014",' +
+						'"custcol_mi_exclude_from_contract":""' + //it's T or null for checkbox in NetsSuite. weird.
+						/*
+						'"options":' +
+						'[' +
+						'{' +
+						'"custcol_mi_list_price":"25",' +
+						'"custcol_mi_contract_term_months":"12",' +
+						'"custcol_mi_contract_line_start_date":"3/6/2013",' +
+						'"custcol_mi_contract_line_end_date":"3/6/2014",' +
+						'"custcol_mi_exclude_from_contract":"false"' +
+						'}' +
+						']' +
+						*/
+						'}' +
+						']' +
+						'}';
+						
+   						
+       				
+            },
+        	generateProductListOptions:
+        	function(prodObj,headerId){
+        		//var prmo=$j.parseJSON(prodObj);
+        		var prodHeader=$j('#'+headerId);
+        		for (var i=0;i<prodObj.productList.length;i++){
+        			var ps='';
+        			switch (prodObj.productList[i].relationshipType){
+        				case 'Pick 1':
+        					ps='<input type="radio" name="' + prodObj.productList[i].parentId + '-pick1"' + 
+        						' value="' + prodObj.productList[i].sfdcId + '" ' + 
+        						(prodObj.productList[i].isSelected?'checked="checked"':'') + ' /><a href="#">' + 
+        						prodObj.productList[i].productDesc + '</a>';
+        					break;
+        				case 'Pick N of M':
+        					po='<input type="checkbox" name="' + prodObj.productList[i].sfdcId + '-pickNM"' +
+        						' value="' + prodObj.productList[i].sfdcId + '" ' + 
+        						(prodObj.productList[i].isSelected?'checked="checked"':'') + ' /><a href="#">' + 
+        						prodObj.productList[i].productDesc + '</a>';
+        					break;
+        				case 'Pre-Req Any 1':
+        					if ($j.browser.msie&&parseInt($j.browser.version,10)==8){
+        						ps='<input type="radio" name="' + prodObj.productList[i].parentId + '-preReqAny1"' +
+	        						' value="' + prodObj.productList[i].sfdcId + 
+	        						'" ' + (prodObj.productList[i].isSelected?'checked="checked"':'') + 
+	        						' onclick="this.blur();this.focus();" onchange="app.blockObj().fadeIn(500);reCalculatePricing();"/>' +
+	        						'<a href="#">' + prodObj.productList[i].productDesc + '</a>';
+        					}
+        					else{
+	        					ps='<input type="radio" name="' + prodObj.productList[i].parentId + '-preReqAny1"' +
+	        						' value="' + prodObj.productList[i].sfdcId + 
+	        						'" ' + (prodObj.productList[i].isSelected?'checked="checked"':'') + 
+	        						' onchange="app.blockObj().fadeIn(500);reCalculatePricing();"/>' +
+	        						'<a href="#">' + prodObj.productList[i].productDesc + '</a>';
+        					}
+        					break;
+        				default:
+        					break;	
+        			}
+        			prodHeader.append($j('<ul/>',{'class':'dimensionHeaderProductIncluded'})
+        										.append($j('<li/>',{'class':'dimensionProduct'}).append(ps)));		
+        					
+        			/*loop into each field
+        			for (var fieldName in prodObj.productList){}*/
+        		}
+        		//app.temp=prodObj;
+        		//return prmo;
+        	},
+        	toggleInformationCentre:
+        	function(toggleObj,toggleCtrlObj){
+        		toggleObj.slideToggle('fast',function(){
+        			if (toggleObj.is(":visible")==true){
+	        			toggleCtrlObj.text('[-]');
+	        			app.ChiaPaneOffsetTopPx=toggleObj.height();	
+	        		}
+	        		else{
+	        			toggleCtrlObj.text('[+]');
+	        			app.ChiaPaneOffsetTopPx=0;
+	        		}
+        		});
+        		
+        	},
+        	togglePackageContent:
+        	function(packageObj){
+        		if (packageObj.parent().parent().hasClass('bulletHeader')){
+        			
+        			var op=packageObj.parent().parent().parent().parent().next();
+        			var sp=op.find('.bulletHeaderNoPackage');
+        			var lp=false;	
+        			
+        			while (sp.length>0){
+        				//op.css({'display':'inline-block'});
+        				op.slideToggle(function(){
+        					if (lp==false){
+			        			if (packageObj.text()=='[+]')
+			        				packageObj.text('[-]');
+			        			else
+			        				packageObj.text('[+]');
+			        				
+			        			lp=true;
+		    				}
+        				});
+        				
+        				op=op.next();
+        				sp=op.find('.bulletHeaderNoPackage');
+        			}
+        		}
+        	},
+        	hidePackageContent:
+        	function(){
+        		$j('.bulletHeaderNoPackage').each(function(){
+        			$j(this).parent().parent().hide();
+        		});
+        	},
+        	promoConfig:
+        	function(comb){
+        		
+        		var param=$j(comb).attr('name').split('-');
+        		var isCombine='';
+        		console.debug(param);
+        		
+        		if (param.length>3){
+        			isCombine=param[2];
+        		}
+        		else
+        			isCombine=param[1];
+        			
+        		if (isCombine=='noCombine'){
+        			$j('input[name*="Combine-promo"]').not('input[name*="'+param[0]+'"]').each(function(){
+        				$j(this).prop("checked", false);
+        				$j(this).attr('disabled','disabled');
+        			});
+        		}
+        	},
+        	promoConfigReset:
+        	function(){
+        		$j('input[name*="Combine-promo"]').each(function(){
+        			$j(this).removeAttr('disabled');
+        			$j(this).prop("checked", false);
+        				
+        		});
+        	},
+        	togglePromoCategory:
+        	function(cat){
+        		var isToggle=false;
+        		
+        		var promoRows=$j(cat).parent().find('ul');
+        		if (promoRows.length>0){
+	        			
+	        		$j(cat).parent().find('ul').each(function(){
+	        			
+	        			$j(this).slideToggle('fast',function(){
+	        				if (isToggle)
+	        					return;
+	        				
+	        				if ($j(cat).text()=='[+]')
+		        				$j(cat).text('[-]');	
+		        			else
+		        				$j(cat).text('[+]');
+		        				
+		        			isToggle=true;	
+	        			});
+	        		});
+        		}
+        		else{
+        			if ($j(cat).text()=='[+]')
+        				$j(cat).text('[-]');	
+        			else
+        				$j(cat).text('[+]');
+        			
+        		}
+        		
+        	}
+        	
+		}
+			
+$j(document).ready(function(){
+	//init();
+	//$j('#contentWrapper > div.bPageFooter.noTableFooter > div').html(app.ver);
+	$j('#mTradeMark').html(app.ver+'&nbsp;&nbsp;&nbsp;&nbsp;');
+					
+
+});
+
+function setConfirmUnload(on) {
+	window.onbeforeunload = (on) ? unloadMessage : null;
+}
+
+function unloadMessage() {
+	app.blockObj().fadeOut(500);
+    return "You're about to leave the configurator, all changes and selections will not be saved. Are you sure?";
+}
+
+var opColumn0,opColumn1,opColumn2,opColumn3;
+var opColumn4,opColumn5,opColumn6,opColumn7;
+
+function generatingFreezedColumns(orgColumn){
+	//alert('test2');
+	if (orgColumn!=null){
+		
+		//if (targetColumn==''){
+		var targetColumn=orgColumn.clone();
+		targetColumn.find('ul > li:gt(1)').remove();
+		targetColumn.height(targetColumn.find('ul > li:eq(0)').height()+
+							targetColumn.find('ul > li:eq(1)').height());  	
+										
+		//}
+		
+		return targetColumn;
+	}
+	
+}
+
+function displayFreezedColumn(opColumn,columnTop,scrollBarTop,columnLeft){
+	//alert('test1');
+	if (opColumn!=null){
+		if (scrollBarTop>=columnTop){
+			opColumn.show();
+			opColumn.css({'top':0,
+					'left':columnLeft,
+					'position':'fixed',
+					'z-index':1000});
+			opColumn.show();
+			$j('.tsc_pricingtable03.tsc_pt3_style1').append(opColumn);
+		}
+		else {
+			opColumn.hide();
+		}		
+	}
+}
+
+function getLeftPx(opColumn){
+	try {
+		return opColumn.offset().left;	
+	}
+	catch(err){
+		return 0;
+	}	
+}
+
+function init(){
+	$j('[name$=selectedItem]').mouseup(function(){
+		app.blockObj().fadeIn(500);
+		displayDetails();
+		/*
+		switch($j(this).val())
+		{
+			case 'bundle':
+				$j('[id$=theBundleList]').show();
+				break;
+			case 'custom':
+				$j('[id$=theBundleList]').hide();
+				break;
+			default:	
+		}
+		
+		$j('[id$=btnNext]').show();
+		*/
+	});
+	$j(':button').keyup(function(){return false;});
+	/*$j('#mTradeMark').css({'top':window.innerHeight-30,
+					'left':window.innerWidth-350,
+					'position':'fixed',
+					'z-index':1000,'color':'gray'}).html(app.ver+'&nbsp;&nbsp;&nbsp;&nbsp;');
+	*/
+	$j('#mTradeMark').html(app.ver+'&nbsp;&nbsp;&nbsp;&nbsp;');
+	/* Chia's fix for the checkbox issue with onchange event */
+	if ($j.browser.msie) {  
+		$j(function() {  
+			$j('li > span > span > input:checkbox').click(function() { 
+				this.blur();  
+				this.focus();  
+			});  
+		});  
+	} 				
+}
+
+/* pricing calculator */
+function pricingCounter(obj){
+		
+	app.calculationBlockObj().show();
+	var op=$j(obj);
+	//$("input").prop('disabled', true);
+	var pId=op.attr('name').split('-');
+	var addingPrice=parseFloat(op.val());
+	//op.prop('disabled', true);
+	var bundleObj=$j('#' + pId[0]);
+	
+	var currentColObj;
+	var currentColNum=$j('#' + pId[0] + '-column').val();
+	switch (currentColNum){
+		case '0':
+			currentColObj=opColumn0.find('span');
+			break;
+		case '1':
+			currentColObj=opColumn1.find('span');
+			break;
+		case '2':
+			currentColObj=opColumn2.find('span');
+			break;
+		case '3':
+			currentColObj=opColumn3.find('span');
+			break;
+		case '4':
+			currentColObj=opColumn4.find('span');
+			break;
+		case '5':
+			currentColObj=opColumn5.find('span');
+			break;
+		case '6':
+			currentColObj=opColumn6.find('span');
+			break;
+		case '7':
+			currentColObj=opColumn7.find('span');
+			break;
+		default:
+			break;	
+	}
+	var bundlePrice=parseFloat(bundleObj.text());
+	if (op.attr('checked')=='checked')
+		movingCounter(bundleObj, currentColObj, op, bundlePrice, bundlePrice+=addingPrice);
+	else
+		movingCounter(bundleObj, currentColObj, op, bundlePrice, bundlePrice-=addingPrice);
+	
+}
+
+var incrementalFrame=10;var t,t1;/*=new Array()*/
+//var i=0;
+/* animating the counter */
+function movingCounter(jObj,clonejObj,inputObj, startPrice, endPrice){
+	//var i=0;
+	//while (t[i]!=null){
+	//i++;
+	//}
+	//$j('[type=checkbox]').attr('readonly',true);
+	//app.calculationBlockObj().fadeIn(10);
+	//p=true;	
+	t=setInterval(function(){animatingCounter(jObj,clonejObj,inputObj,startPrice,endPrice,Math.abs(Math.abs(endPrice-startPrice)<incrementalFrame?(endPrice-startPrice):(endPrice-startPrice)/incrementalFrame));},10);
+	
+}
+
+function animatingCounter(jObj,clonejObj,inputObj,startPrice,endPrice,incrementalSpeed){
+	var bundlePrice=parseFloat(jObj.text());
+	if (startPrice<endPrice){
+		bundlePrice+=incrementalSpeed;
+		if (bundlePrice>endPrice)
+			bundlePrice=endPrice;
+	}
+	else if (startPrice>endPrice){
+		bundlePrice-=incrementalSpeed;
+		if (bundlePrice<endPrice)
+			bundlePrice=endPrice;
+	}
+	
+	
+	//var fn=Math.round(bundlePrice*100)/100;
+	var fn=Math.round(bundlePrice);
+	jObj.text(fn);
+	if (clonejObj!=null)
+		clonejObj.text(fn);
+	
+	if (bundlePrice==endPrice){
+		clearInterval(t);
+		app.calculationBlockObj().hide();
+	}
+}
+
+
+
+function animatingSearchPanelInStep1(){
+	$j('.errorMsgHeader').hide();
+	$j('input[type=text]').each(function(){$j(this).poshytip('hide');});
+	$j('[id$=addModuleBtnStep1]').attr("disabled", "disabled");
+	/* bad Design but no choice */
+	app.blockObj().fadeIn(500,
+		function(){
+			$j('[id$=step1Section]').slideUp('slow',
+				function(){
+					app.searchPadObj().slideDown('slow',
+						function(){
+							init();
+							app.blockObj().fadeOut(500);
+							
+						});
+			
+				});
+		});
+	
+	
+	/*
+	Good design 
+	 
+	app.searchBlockObj().show();
+	app.searchPadObj().show().animate({width:$j(document).width()-70,height:$j(window).height()-100}, 500);
+	app.searchPadContentObj().height($j(window).height()-100);
+	*/
+}
+
+
+function animatingSearchPanelInStep3(){
+	$j('.errorMsgHeader').hide();
+	$j('input[type=text]').each(function(){$j(this).poshytip('hide');});
+	$j('[id$=addModuleBtnStep3]').attr("disabled", "disabled");
+	/* bad Design but no choice */
+	app.blockObj().fadeIn(500,
+		function(){
+			$j('[id$=promoSection]').slideUp('slow',
+				function(){
+					$j('[id$=step3Section]').slideUp('slow',
+						function(){
+							app.searchPadObj().slideDown('slow',
+								function(){
+									init();
+									app.blockObj().fadeOut(500);
+									
+								});
+						});
+				});
+		});
+	
+	
+	/*
+	Good design 
+	 
+	app.searchBlockObj().show();
+	app.searchPadObj().show().animate({width:$j(document).width()-70,height:$j(window).height()-100}, 500);
+	app.searchPadContentObj().height($j(window).height()-100);
+	*/
+}
+
+function closeSearchPanelInStep1(){
+	//app.blockObj().fadeIn(500,function(){app.searchPadObj().slideDown('slow',function(){$j('[id$=step3Section]').slideDown('slow',function(){$j('[id$=promoSection]').slideDown('slow',function(){init(); app.blockObj().fadeOut(500);});});});
+	app.blockObj().fadeIn(500,
+		function(){
+			app.searchPadObj().slideUp('slow',
+				function(){
+					$j('[id$=step1Section]').slideDown('slow',
+						function(){
+							init();
+							app.blockObj().fadeOut(500);
+							$j('[id$=addModuleBtnStep1]').removeAttr('disabled');
+						});
+				});
+		});
+	
+}
+
+function closeSearchPanelInStep3(){
+	//app.blockObj().fadeIn(500,function(){app.searchPadObj().slideDown('slow',function(){$j('[id$=step3Section]').slideDown('slow',function(){$j('[id$=promoSection]').slideDown('slow',function(){init(); app.blockObj().fadeOut(500);});});});
+	app.blockObj().fadeIn(500,
+		function(){
+			app.searchPadObj().slideUp('slow',
+				function(){
+					$j('[id$=step3Section]').slideDown('slow',
+						function(){
+							$j('[id$=promoSection]').slideDown('slow',
+								function(){
+									init();
+									app.blockObj().fadeOut(500);
+									$j('[id$=addModuleBtnStep3]').removeAttr("disabled");
+								});
+						});
+				});
+		});
+	
+}
+
+function closeSearchPanelAfterAddProduct(){
+	//app.blockObj().fadeIn(500,function(){app.searchPadObj().slideDown('slow',function(){$j('[id$=step3Section]').slideDown('slow',function(){$j('[id$=promoSection]').slideDown('slow',function(){init(); app.blockObj().fadeOut(500);});});});
+	$j('[id$=step3Section]').slideDown('slow',
+		function(){
+			$j('[id$=promoSection]').slideDown('slow',
+				function(){
+					init();
+					app.blockObj().fadeOut(500);
+				});
+		});
+}
+
+/** dojo cometd begin - Real-time porting the system event */
+
+dojo.require('dojox.cometd');
+dojo.require('dojox.cometd.timestamp');
+dojo.require('dojox.cometd.ack');
+
+dojo.ready(function() { 
+    
+    var datastream = {
+        _topic: null,
+        _connected: false,
+        _disconnecting: false,
+        _topicsubscription: null,
+        _token: null, 
+        _clientid: '3MVG9lKcPoNINVBJL81nlIzB6Z7TFQtwfc6rMsiZXaW_yUy2Dv35Ayfe248X4yEMgEz0GmNDK5QMJ0MSFZdha',
+        _loginURL: location.protocol + '//' + location.host + '//' + 'services/oauth2/authorize',
+    
+        _init: function()
+        { 
+            //dojo.removeClass('join', 'hidden');
+            //dojo.addClass('joined', 'hidden');
+            /*
+            dojo.query('#loginButton').onclick(function(e) {
+            	datastream.login();
+            });
+            
+            dojo.query('#createTopicButton').onclick(function(e)
+            {
+                datastream.createTopic();
+            }); 
+    
+            dojo.query('#deleteTopicButton').onclick(function(e)
+            {
+                datastream.deleteTopic(dojo.byId('topicName').value);
+            }); 
+            
+            dojo.query('#createAccountButton').onclick(function(e)
+            {
+                datastream.createAccount();
+            }); 
+            
+            dojo.query('#updateAccountButton').onclick(function(e)
+            {
+                datastream.updateAccount();
+            }); 
+    
+            dojo.query('#subscribeButton').onclick(function(e)
+            {
+                //datastream.subscribe('dojo.byId('topic').value');
+                datastream.subscribe('/topic/PricingScheduleUpdate');
+            }); 
+    
+            dojo.query('#leaveButton').onclick(datastream, 'leave');
+    		*/
+            // Check if there was a saved application state
+            var stateCookie = dojox.cometd.COOKIE?dojox.cometd.COOKIE.get('dojox.cometd.demo.state'):null;
+            var state = stateCookie ? dojox.cometd.JSON.fromJSON(stateCookie) : null;
+            // Restore the state, if present
+            if (state)
+            {
+                dojo.byId('topic').value=state.topic;
+                setTimeout(function()
+                {
+                    // This will perform the handshake
+                    datastream.subscribe(app.sfdcStreamingChannel);
+                }, 0);
+            }
+        },
+    
+        subscribe: function(topic)
+        {  
+            var cometdURL = location.protocol + '//' + location.host + '/cometd/26.0';
+            var auth = 'OAuth ' + app.sfdcAPISessionId;
+            dojox.cometd.configure({
+            	url: cometdURL,
+                requestHeaders: 
+            	    { Authorization: auth}
+            });
+            dojox.cometd.handshake();
+            datastream._disconnecting = false;
+    
+            if (topic == null || name.topic == 0)
+            {
+                alert('Please enter a topic');
+                return;
+            }
+    
+            datastream._topic = topic;
+    
+            //dojo.addClass('join', 'hidden');
+            //dojo.removeClass('joined', 'hidden');
+            datastream._topicsubscription = dojox.cometd.subscribe(datastream._topic, datastream.receive);
+        },
+    
+        _unsubscribe: function()
+        {
+            if (datastream._topicsubscription)
+            {
+                dojox.cometd.unsubscribe(datastream._topicsubscription);
+            }
+            datastream._topicsubscription = null;
+        },
+    
+        leave: function()
+        { 
+            datastream._unsubscribe(); 
+            dojox.cometd.disconnect();
+    
+            // switch the input form
+            //dojo.removeClass('join', 'hidden');
+            //dojo.addClass('joined', 'hidden');
+    
+            //dojo.byId('topic').focus();
+    
+            datastream._topic = null;
+            datastream._disconnecting = true;
+        },
+    
+        receive: function(message) 
+        { 
+            var datastream = dojo.byId('datastreamContent');
+        	//data = message.data; 
+        	var obj = message.data;//$j.parseJSON(message.data);
+            app.postStreamingMessage('The Pricing Schedule <a href=\"/' + obj.sobject.Id + '\" target=\"_blank\">' + obj.sobject.Name + '</a> has just been ' + obj.event.type + ' by Mitchell Product Management team. <a href=\"javascript:void(0);\" onclick=\"window.location.reload();\">Reload the Configurator</a> to get the most updated pricing.');
+            //datastream.innerHTML += '<span class=\'text\'>' + JSON.stringify(data, null, '\t') + '</span><br/>';
+            //datastream.innerHTML += '<span class=\'text\'>' + '_____________ ' + '</span><br/>';
+            //datastream.scrollTop = datastream.scrollHeight - datastream.clientHeight;
+        },
+        
+        display: function(text) {
+        	app.postStreamingMessage(text);
+            //var datastream = dojo.byId('datastreamContent');
+            //datastream.innerHTML += '<span class=\'data\'><span class=\'text\'>' + text + '</span></span><br/>';
+            //datastream.scrollTop = datastream.scrollHeight - datastream.clientHeight;
+        }
+    };
+    
+    var datastream2 = {
+        _topic: null,
+        _connected: false,
+        _disconnecting: false,
+        _topicsubscription: null,
+        _token: null, 
+        _clientid: '3MVG9lKcPoNINVBJL81nlIzB6Z7TFQtwfc6rMsiZXaW_yUy2Dv35Ayfe248X4yEMgEz0GmNDK5QMJ0MSFZdha',
+        _loginURL: location.protocol + '//' + location.host + '//' + 'services/oauth2/authorize',
+    
+        _init: function()
+        { 
+            // Check if there was a saved application state
+            var stateCookie = dojox.cometd.COOKIE?dojox.cometd.COOKIE.get('dojox.cometd.demo.state2'):null;
+            var state = stateCookie ? dojox.cometd.JSON.fromJSON(stateCookie) : null;
+            // Restore the state, if present
+            if (state)
+            {
+                dojo.byId('topic').value=state.topic;
+                setTimeout(function()
+                {
+                    // This will perform the handshake
+                    datastream2.subscribe(app.sfdcStreamingChannel);
+                }, 0);
+            }
+        },
+    
+        subscribe: function(topic)
+        {  
+            var cometdURL = location.protocol + '//' + location.host + '/cometd/26.0';
+            var auth = 'OAuth ' + app.sfdcAPISessionId;
+            dojox.cometd.configure({
+            	url: cometdURL,
+                requestHeaders: 
+            	    { Authorization: auth}
+            });
+            dojox.cometd.handshake();
+            datastream2._disconnecting = false;
+    
+            if (topic == null || name.topic == 0)
+            {
+                alert('Please enter a topic');
+                return;
+            }
+    
+            datastream2._topic = topic;
+    
+            //dojo.addClass('join', 'hidden');
+            //dojo.removeClass('joined', 'hidden');
+            datastream2._topicsubscription = dojox.cometd.subscribe(datastream2._topic, datastream2.receive);
+        },
+    
+        _unsubscribe: function()
+        {
+            if (datastream2._topicsubscription)
+            {
+                dojox.cometd.unsubscribe(datastream2._topicsubscription);
+            }
+            datastream2._topicsubscription = null;
+        },
+    
+        leave: function()
+        { 
+            datastream2._unsubscribe(); 
+            dojox.cometd.disconnect();
+    
+            // switch the input form
+            //dojo.removeClass('join', 'hidden');
+            //dojo.addClass('joined', 'hidden');
+    
+            //dojo.byId('topic').focus();
+    
+            datastream2._topic = null;
+            datastream2._disconnecting = true;
+        },
+    
+        receive: function(message) 
+        { 
+            //var datastream = dojo.byId('datastreamContent');
+        	//data = message.data; 
+        	var obj = message.data;//$j.parseJSON(message.data);
+            app.postStreamingMessage('The Opportunity <a href=\"/' + obj.sobject.Id + '\" target=\"_blank\">' + obj.sobject.Name + '</a> has just been ' + obj.event.type + ' by Mitchell Sales Team. <a href=\"javascript:void(0);\" onclick=\"window.location.reload();\">Reload the Configurator</a> to get the most updated pricing.');
+            //datastream.innerHTML += '<span class=\'text\'>' + JSON.stringify(data, null, '\t') + '</span><br/>';
+            //datastream.innerHTML += '<span class=\'text\'>' + '_____________ ' + '</span><br/>';
+            //datastream.scrollTop = datastream.scrollHeight - datastream.clientHeight;
+        },
+        
+        display: function(text) {
+        	app.postStreamingMessage(text);
+            //var datastream = dojo.byId('datastreamContent');
+            //datastream.innerHTML += '<span class=\'data\'><span class=\'text\'>' + text + '</span></span><br/>';
+            //datastream.scrollTop = datastream.scrollHeight - datastream.clientHeight;
+        }
+    };
+    
+    dojo.addOnLoad(datastream, '_init');
+    dojo.addOnLoad(datastream2, '_init');
+    
+    dojo.addOnUnload(function()
+    {
+        if (datastream._topic)
+        {
+            // dojox.cometd.reload();
+            dojox.cometd.COOKIE.set('org.cometd.demo.state', dojox.cometd.JSON.toJSON({
+                topic: datastream._topic
+            }), { 'max-age': 5 });
+        }
+        else
+            dojox.cometd.disconnect();
+            
+        
+    });
+    
+    dojo.addOnUnload(function()
+    {
+        if (datastream2._topic)
+        {
+            // dojox.cometd.reload();
+            dojox.cometd.COOKIE.set('org.cometd.demo.state2', dojox.cometd.JSON.toJSON({
+                topic: datastream2._topic
+            }), { 'max-age': 5 });
+        }
+        else
+            dojox.cometd.disconnect();
+    });
+    
+    //var i;
+    //var op=app.sfdcStreamingChannel.split(';');
+	//for (i = 0; i < op.length; i++) {
+	datastream.subscribe(app.sfdcStreamingChannel1); 	
+	//datastream2.subscribe(app.sfdcStreamingChannel2); 	
+	//}
+});
+
+/* Google Analytics */
+  var _gaq = _gaq || [];
+  _gaq.push(['_setAccount', 'UA-37889206-1']);
+  _gaq.push(['_setDomainName', 'salesforce.com']);
+  _gaq.push(['_setAllowLinker', true]);
+  _gaq.push(['_trackPageview']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+

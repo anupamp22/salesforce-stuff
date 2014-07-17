@@ -1,0 +1,856 @@
+/*
+ * Author: Chia Chang
+ * Developer: Chia Chang
+ * Title: Product Configurator Extension
+ * Description: Extension for the Product Configurator
+ * Ref#: 1.3
+ * Open Issues (remove when resolved): N/A
+ * Usage: See test Method.
+ * API Version: SFDC Fall v24.0
+ * Licensing: Mitchell International.
+ * Revisions' History: 
+ * 11.11.2012- Engineering annotations
+ * 12.11.2012 - Changes made by Anupam - Fixed the UAT issues 
+ * 12.14.2012 - change with sharing to without sharing per team discussion
+ * 12.17.2012 - changes made by Anupam - search string to be 3 chars and adding sorting to package sel 
+ * 05.13.2012 - Test coverage revisited for Order-2-Cash phase II 
+ */
+
+global without sharing class C2CExtV4 extends CommonObj {
+
+  public integer stage {get;set;}
+  
+  public string packageClass {get;set;}
+  
+  public string selectedBundleId {get;set;}
+
+  public ProductConfiguratorObj pConfig {get;set;}
+  
+  public decimal upfrontOriginalPayment {get;set;}
+  
+  public decimal recurringOriginalPayment {get;set;}
+  
+  public Product2 searchProduct {get;set;}
+  
+  //public list<Product2> additionalProducts{get;set;}
+  
+  public set<string> selectedPromoIds {get;set;} 
+    
+  /* Begin Search Varaibles Depleting
+  public string productLine {
+    get{
+      if (productLine==null||productLine=='')
+        return 'None';
+        return productLine;  
+      }
+      set;
+  }
+  public string subProduct {
+    get{
+      if (subProduct==null||subProduct=='')
+        return 'None';
+      return subProduct;  
+    }
+    set;
+  }
+  */
+  public string productKeyword {get;set;}
+  public boolean isSearchByKeyword {get;set;}
+  /* End Search Variables */
+  
+  /* JSON Custom Messages for advanced ajax real-time validation */
+  public string customMessages {get;set;}
+  
+  /* Begin Shopping Cart Variables */
+  public string selectedProductId {get;set;}
+  
+  @isTest(SeeAllData=true)
+    static void test(){
+      PageReference pageRef = Page.C2CProductDemoV4; //replace with your VF page name
+        Test.setCurrentPage(pageRef);
+      List<Opportunity> opps=[Select o.Id From Opportunity o where o.Id='0066000000OJwpC'];
+      
+        ApexPages.currentPage().getParameters().put('oppID', opps[0].Id);
+        ApexPages.currentPage().getParameters().put('inputLicense', '3');
+        ApexPages.currentPage().getParameters().put('inputContractTerm', '36');
+        
+      C2CExtV4 ctrl = new C2CExtV4();
+      list<SelectOption> sClass=ctrl.getProductClassifications();
+      
+      string y1,y2,pClass;
+    for (string x1:ctrl.pConfig.aLaCarteIds.keySet()){
+      if (y1!=null&&y2!=null&&pClass!=null)
+        break;
+        
+      map<string,ProductMatrixObject> x2=
+        ctrl.pConfig.productMatrix.get(x1);
+      
+      if (x2.values().size()>1){
+        pClass=x1;
+        for (string x3:x2.keySet()){
+ 
+          if (ctrl.pConfig.aLaCarteIds.get(x1)==x3)
+            y2=x3;
+          else if(x2.get(x3).packageType=='All'&&y1==null){
+            y1=x3;
+          }
+        }
+            
+      }
+    }
+    
+      ctrl.packageClass=pClass;
+      list<ProductMatrixObject> sBundle=ctrl.getBundleList();
+      ApexPages.currentPage().getParameters().put(y1, y1);
+      
+      PageReference w21=ctrl.nextStep();
+      list<ProductMatrixObject> w1=ctrl.getSelectedBundleList();
+      list<ProductRelationshipMatrixObject> w2=ctrl.getModuleList();
+      ctrl.selectedBundleId=y1;
+      PageReference w3=ctrl.selectBundle();
+      PageReference w4=ctrl.displayDetails();
+      ctrl.previousStep();
+      ctrl.goToStep1();
+      ctrl.stage=3;
+      //list<Promotions__c> w5=ctrl.getPromoList();
+      integer w6=ctrl.numOfPackages;
+      list<ProductMatrixObject> w7=ctrl.getCheckoutBundleList();
+      PageReference w8=ctrl.displaySearchDetails();
+      list<ProductMatrixObject> w9=ctrl.pConfig.productMap.values();
+      //ApexPages.currentPage().getParameters().put(w9[0].sfdcId+'-search', w9[0].sfdcId);
+      ctrl.isSearchByKeyword=true;
+      ApexPages.currentPage().getParameters().put('inputProductKeyword','ult');
+      list<Product2> w10=ctrl.getProductListByKeyword();
+      ApexPages.currentPage().getParameters().put(w10[0].Id+'-search',w10[0].Id);
+      
+      ctrl.addAdditionalProduct();
+      ctrl.selectedProductId=w10[0].Id;
+      PageReference w11=ctrl.removeShoppingCartItem();
+      w11=ctrl.updateNumUserContractTermInCart();
+      
+      //ApexPages.currentPage().getParameters().put(w5[0].Id+'-promo',w5[0].Id);
+      ctrl.applyPromotion();
+      ctrl.reCalculate();
+      Opportunity w12=ctrl.CurrentOpp;
+      string w13=ctrl.recurringPromotionDiscount;
+      string w14=ctrl.recurringPromotionPercentageDiscount;
+      string w15=ctrl.upfrontPromotionDiscount;
+      string w16=ctrl.upfrontPromotionPercentageDiscount;
+      string w17=ctrl.recurringShoppingCartTotal;
+      string w18=ctrl.listPriceShoppingCartSubtotal;
+      string w19=ctrl.upfrontOriginalPaymentStr;
+      string w20=ctrl.recurringOriginalPaymentStr;
+      string w22=ctrl.promoListStr;
+      
+      ctrl.stage=3;
+      ApexPages.currentPage().getParameters().put(w10[0].Id+'-search',w10[0].Id);
+      ctrl.addAdditionalProduct();
+      
+      w21=ctrl.nextStep();
+      
+    
+      //ctrl.addAdditionalProduct();
+        //controller.getData();
+       // List<Opportunity> opps = controller.getOpportunities();
+        //System.assertEquals(opps.size(), <<whatever you expect the no. of opportunities to be>>);
+        //controller.UpdateRecords();
+        //List<Opportunity> opps = [select .... from Opportunity where ....]; //query for the test Opportunity records
+        //System.assertEquals(<<verify that the expected changes have been made to the test Opp records>>);
+    }
+  
+  /* static instantiation */
+  {
+    stage=1;
+    isSearchByKeyword=false;
+    upfrontOriginalPayment=0;
+    recurringOriginalPayment=0;
+    selectedPromoIds=new set<string>();
+    searchProduct=new Product2();
+    pConfig=new ProductConfiguratorObj();
+    customMessages='';
+  }
+  
+  /* Standard Constructor */
+  public C2CExtV4(ApexPages.StandardController controller){}
+
+  /* Overriding Constructor */
+  public C2CExtV4(){
+    try {
+      Map<String, String> bs=ApexPages.currentPage().getParameters();
+    
+      if (bs.get('oppID')==null||bs.get('oppID')=='') {
+        stage=0;
+        pConfig.addCommonMessage('The opportunity must have license unit, number of users, and contract term defined.');
+        throw new CommonException('User ' + UserInfo.getName() + ' attempted to launch the configurator outside of an Opportunity',CommonExceptionType.NoOpportunityInfo);
+      }
+      
+      pConfig=new ProductConfiguratorObj(bs.get('oppID'));
+      
+      if (pConfig.currentOpp.m_License_Unit__c==null||
+        pConfig.currentOpp.Number_of_Users__c==null||
+        pConfig.currentOpp.Contract_Term__c==null){
+        stage=-1;
+        pConfig.addCommonMessage('The opportunity must have license unit, number of users, and contract term defined.');
+        throw new CommonException('User ' + UserInfo.getName() + ' attempted to launch the configurator from an Opportunity ' + pConfig.currentOpp.Name +' with no license unit, number of user or contract term defined.',CommonExceptionType.NoOpportunityInfo);
+      }
+    }
+    catch (CommonException cEx){
+      cEx.notifyViaEmail(developerEmails);
+    }
+  }
+  
+  public integer numOfPackages {
+    get{
+      if (packageClass==null||packageClass=='') return 0;
+      return pConfig.productMatrix.get(packageClass).values().size();
+    }
+  }
+
+  public list<ProductMatrixObject> getBundleList(){
+    //system.debug('chia debug 1');
+    list<ProductMatrixObject> op=new list<ProductMatrixObject>();
+    if (packageClass==''||packageClass==null) return op;
+    /*
+    system.debug('Chia\'s log start here');
+    system.debug(packageClass);
+    system.debug(pConfig.productMatrix.get(packageClass));
+    system.debug(pConfig.alaCarteIds.get(packageClass));
+    system.debug(pConfig.productMatrix.get(packageClass).get(pConfig.alaCarteIds.get(packageClass)));
+    system.debug('Chia\'s log end here');
+    */
+    try {
+      for (ProductMatrixObject pmo:pConfig.productMatrix.get(packageClass).values()){
+        //if (pmo.packageType=='All'||pmo.packageType=='Ala Carte'){
+        // Not Enforcing this Biz rule for anti-stupidity  
+          if (pConfig.bizObj.isValidLicenseUnit(pmo.sfdcId,pConfig.currentOpp.m_License_Unit__c)&&
+            pConfig.bizObj.isPackageForSelectedNumUsers(pmo.sfdcId,
+                              integer.valueOf(pConfig.currentOpp.Number_of_Users__c))&&
+            pConfig.bizObj.isPackageForSelectedContractTerms(pmo.sfdcId,
+                              integer.valueOf(pConfig.currentOpp.Contract_Term__c))){
+            op.add(pmo);
+          }
+        //}
+      }
+          
+      if (op.size()>1)
+        op.sort();
+        
+      return op;  
+      
+    }
+    //catch (CommonException cEx){
+    //  cEx.notifyViaEmail('Developer Log',developerEmails);
+    //}
+    catch (Exception ex){
+      pConfig.addCommonMessage(ApexPages.Severity.FATAL,ex.getMessage());
+      return op;
+      //pConfig.addCommonMessage(ApexPages.Severity.FATAL,ex.getStackTraceString());
+      //pConfig.addCommonMessage(ApexPages.Severity.FATAL,'Line: ' +ex.getLineNumber());
+    }
+    
+  }
+  
+  /* returning packages that are being selected */
+  public list<ProductMatrixObject> getSelectedBundleList(){
+    list<ProductMatrixObject> op=new list<ProductMatrixObject>();
+    for (ProductMatrixObject pmo:pConfig.productComparisonMatrix.values()){
+      if (pmo.packageType=='All'||pmo.packageType=='Ala Carte')
+        op.add(pmo);
+    }
+    
+    op.sort();
+    return op;
+  }
+  
+  /* returning packages in the shoppingcart */
+  public list<ProductMatrixObject> getCheckoutBundleList(){
+    //system.debug(productShoppingCart.values());
+    list<ProductMatrixObject> op=pConfig.productShoppingCart.values();
+    op.sort();
+    system.debug(op);
+    return op;
+  }
+  
+  
+  /* deep copy the selected package into the cart map */
+  public PageReference selectBundle(){
+    map<string,string> bs=ApexPages.currentPage().getParameters();
+    if (!pConfig.productShoppingCart.containsKey(selectedBundleId)){
+      pConfig.addShoppingCartItems(bs,selectedBundleId);
+    }
+    
+    map<string,string> cm=pConfig.resetShoppingCartPricing(bs);
+    
+    JSONGenerator gen = JSON.createGenerator(true);
+        gen.writeStartObject();
+        gen.writeObjectField('messages',cm);
+        gen.writeEndObject();
+        customMessages=gen.getAsString();
+        
+    upfrontOriginalPayment=decimal.valueOf(upfrontShoppingCartSubtotal.replace(',',''));
+    recurringOriginalPayment=decimal.valueOf(recurringShoppingCartSubtotal.replace(',',''));
+    
+    stage=3;
+    return null;
+  }
+  
+  public list<ProductRelationshipMatrixObject> getModuleList(){
+    if (packageClass==''||packageClass==null)
+      return new list<ProductRelationshipMatrixObject>();
+      
+    if (!pConfig.aLaCarteIds.containsKey(packageClass))  
+      return new list<ProductRelationshipMatrixObject>();
+  
+    
+    if (pConfig.productComparisonMatrix.containsKey(pConfig.aLaCarteIds.get(packageClass)))  
+      return ((ProductMatrixObject)pConfig.productComparisonMatrix.get(pConfig.aLaCarteIds.get(packageClass))).getFullProductList;
+    else{
+      return new list<ProductRelationshipMatrixObject>();
+    }
+      
+  }
+  
+  public PageReference displayDetails(){
+    return null;
+  }
+  
+  public PageReference displaySearchDetails(){
+    
+    if (isSearchByKeyword){
+      searchProduct=new Product2();
+    }
+    else
+      productKeyword='';
+      
+    return null;
+  }
+  
+  
+  public void addAdditionalProduct(){
+    map<string,string> bs=ApexPages.currentPage().getParameters();
+    stage=3;
+    for (Product2 pc2:getProductListByKeyword()){
+      if (bs.containsKey(pc2.Id+'-search')){
+        try{
+          pConfig.addShoppingCartItem(pc2.Id,bs);
+        }
+        catch (CommonException cEx){
+          pConfig.addCommonMessage(ApexPages.Severity.WARNING,cEx.developerAnnotation);
+          cEx.notifyViaEmail(CommonObj.developerEmails);
+        }
+      }
+    }
+    //additionalProducts=new list<Product2>();
+    productKeyword='';
+    searchProduct=new Product2();
+    isSearchByKeyword=false;
+    
+    //customMessages=pConfig.resetShoppingCartPricing(bs);
+    map<string,string> cm=pConfig.resetShoppingCartPricing(bs);
+    
+    JSONGenerator gen = JSON.createGenerator(true);
+        gen.writeStartObject();
+        gen.writeObjectField('messages',cm);
+        gen.writeEndObject();
+        customMessages=gen.getAsString();
+        
+    upfrontOriginalPayment=decimal.valueOf(upfrontShoppingCartSubtotal.replace(',',''));
+    recurringOriginalPayment=decimal.valueOf(recurringShoppingCartSubtotal.replace(',',''));
+  }
+  
+  public PageReference removeShoppingCartItem(){
+    map<string,string> bs=ApexPages.currentPage().getParameters();
+    
+    pConfig.removeShoppingCartItem(selectedProductId);
+    //customMessages=pConfig.resetShoppingCartPricing(bs);
+    map<string,string> cm=pConfig.resetShoppingCartPricing(bs);
+    
+    JSONGenerator gen = JSON.createGenerator(true);
+        gen.writeStartObject();
+        gen.writeObjectField('messages',cm);
+        gen.writeEndObject();
+        customMessages=gen.getAsString();
+        
+    upfrontOriginalPayment=decimal.valueOf(upfrontShoppingCartSubtotal.replace(',',''));
+    recurringOriginalPayment=decimal.valueOf(recurringShoppingCartSubtotal.replace(',',''));
+    return null;
+  }
+  
+  public void applyPromotion(){
+    
+    Map<String, String> bs=ApexPages.currentPage().getParameters();
+    selectedPromoIds=new set<string>();
+    
+    map<string,map<id,Promotions__c>> promoMap=this.promoList;
+    for (string catKey:promoMap.keySet()){
+      for (string promoId:promoMap.get(catKey).keySet()){
+        Promotions__c thePromo=promoMap.get(catKey).get(promoId);
+        string isCombine=(thePromo.Promo_Category_Lookup__r.Allow_Combining__c==true?
+              'Combine':'noCombine');
+        
+        //allow multiple promotion
+        if (bs.containsKey(thePromo.Promo_Category_Lookup__r.Id+'-'+promoId+'-'+isCombine+'-promo')){
+          selectedPromoIds.add(promoId);
+          continue;
+        }
+        
+        //single promotion
+        if (bs.containsKey(thePromo.Promo_Category_Lookup__r.Id+'-'+isCombine+'-promo')){
+          
+          if (bs.get(thePromo.Promo_Category_Lookup__r.Id+'-'+isCombine+'-promo')==promoId){
+            selectedPromoIds.add(promoId);
+            break;
+          }
+        }
+      }
+    }  
+    
+    map<string,string> cm=pConfig.resetShoppingCartPricing(bs);
+    
+    JSONGenerator gen = JSON.createGenerator(true);
+        gen.writeStartObject();
+        gen.writeObjectField('messages',cm);
+        gen.writeEndObject();
+        customMessages=gen.getAsString();
+        
+    upfrontOriginalPayment=decimal.valueOf(upfrontShoppingCartSubtotal.replace(',',''));
+    recurringOriginalPayment=decimal.valueOf(recurringShoppingCartSubtotal.replace(',',''));
+    
+    pConfig.applyPromosInShoppingCart(selectedPromoIds,
+                    decimal.valueOf(upfrontShoppingCartSubtotal.replace(',','')),
+                    decimal.valueOf(recurringShoppingCartSubtotal.replace(',','')));
+    
+  }
+  
+  public void goToStep1(){
+    stage=1;
+  }
+  
+  public string productComparisonMatrixStr{
+    get {
+      return JSON.serialize(pConfig.productComparisonMatrix);  
+    }
+  }
+  
+  public string selectPackageId {get;set;}
+  /*
+  public void addProductComparisonMatrixRM(){
+    boolean HResult=pConfig.addProductComparisonMatrix(new map<string,string>{selectPackageId=>selectPackageId},packageClass);
+  }
+  */
+  public PageReference updateNumUserContractTermInCart(){
+    Map<String, String> bs=ApexPages.currentPage().getParameters();
+    pConfig.updateNumUserContractTermInCart(integer.valueOf(bs.get('inputLicense')),
+                        integer.valueOf(bs.get('inputContractTerm')),bs);
+    pConfig.resetShoppingCartPricing(bs);
+    
+    upfrontOriginalPayment=decimal.valueOf(upfrontShoppingCartSubtotal.replace(',',''));
+    recurringOriginalPayment=decimal.valueOf(recurringShoppingCartSubtotal.replace(',',''));
+    
+    if (stage!=3){
+      stage=1;
+      pConfig.productComparisonMatrix.clear();
+      /*
+      PageReference curPage = ApexPages.currentPage();
+      curPage.getParameters().put('sfdc.tabName',bs.get('sfdc.tabName'));
+      curPage.getParameters().put('oppID',bs.get('oppID'));
+      curPage.setRedirect(true);
+         return curPage;
+         */
+    }
+    
+    return null;
+  }
+  
+  public PageReference nextStep(){
+    if (stage==1) {
+      if (!pConfig.aLaCarteIds.containsKey(packageClass)){
+        pConfig.addCommonMessage('The Ala-Carte package for this package classification- ' + packageClass +
+                    ' does not have active pricing defined. Please contact Product Management team for details.');
+        return null;
+      }
+        
+      boolean hresult=pConfig.addProductComparisonMatrix(ApexPages.currentPage().getParameters(),packageClass);
+      if (!hresult)
+        return null;
+    }
+    
+    if (stage==2){
+      /* Changed by Anupam- Commenting out this validation in stage 2 as per Sarat's Request and moving to stage=3*/
+      /*if (pConfig.productShoppingCart.values().size()<1){
+        pConfig.addCommonMessage('Please select at least one product/package. Your product list is empty.');
+        return null;
+      }*/
+    }
+    
+    if (stage==3){
+      
+      
+      //Map<String, String> bs=ApexPages.currentPage().getParameters();
+    
+      //if (!pConfig.pricingConfigObj.promotionMap.containsKey(bs.get('PromotionDiscount'))) return null;
+      /* Changed by Anupam- Commenting out this check in stage 2 as per Sarat's Request and moving to stage=3*/
+      if (pConfig.productShoppingCart.values().size()<1){
+        pConfig.addCommonMessage('Please add at least one product/package. Your cart list is empty.');
+        return null;
+      }      
+    
+      try{ 
+        
+        boolean op=pConfig.generateOpportunityProducts(ApexPages.currentPage().getParameters(),selectedPromoIds);
+        
+        if (!op){
+          pConfig.addCommonMessage('Fail to create Opportunity line items and/or promotions.');
+          return null;
+        }
+        /*
+        OppPricingConfiguratorExtn opc=new OppPricingConfiguratorExtn();
+        op=opc.generateOpportunityPromo(pConfig.currentOpp,selectedPromoIds);
+        
+        if (!op){
+          pConfig.addCommonMessage('Fail to create promotions.');
+          return null;
+        }
+        */
+      }
+      /*
+      catch (Exception ex){
+        pConfig.notifyStandardExceptionViaEmail('Opportunity Line Item Issue',ex,developerEmails);
+        pConfig.addCommonMessage('You\'re experiencing a technical issue and a separate email regarding to this error has been sent to the CRM team. Please contact the Product Management team for details. We apologise for the inconvience.');
+        //stage=-1;
+        return null;
+      }
+      */
+      catch (CommonException cEx){
+        pConfig.addCommonMessage(ApexPages.Severity.WARNING,cEx.developerAnnotation);
+        cEx.notifyViaEmail(CommonObj.developerEmails);
+        return null;
+      }
+      
+      return new pageReference('/'+pConfig.currentOpp.Id);
+    }
+    
+    stage++;
+    
+    return null;
+  }
+  
+  public void previousStep(){
+    stage--;
+    //return null;
+  }
+  
+  /* Re-Calculate the pricing in the Cart*/
+  public void reCalculate(){
+    map<String, String> bs=ApexPages.currentPage().getParameters();
+    //customMessages=pConfig.resetShoppingCartPricing(bs);
+    map<string,string> cm=pConfig.resetShoppingCartPricing(bs);
+    
+    JSONGenerator gen = JSON.createGenerator(true);
+        gen.writeStartObject();
+        gen.writeObjectField('messages',cm);
+        gen.writeEndObject();
+        customMessages=gen.getAsString();
+        
+        //applyPromotion();
+    selectedPromoIds=new set<string>();
+    upfrontOriginalPayment=decimal.valueOf(upfrontShoppingCartSubtotal.replace(',',''));
+    recurringOriginalPayment=decimal.valueOf(recurringShoppingCartSubtotal.replace(',',''));
+  }
+  
+  public map<string,map<id,Promotions__c>> promoList{
+    get{
+      map<id,string> cart=new map<id,string>();
+      for (ProductMatrixObject pmo:pConfig.productShoppingCart.values()){
+        cart.put(pmo.sfdcId,pmo.productCode);
+      }
+      
+      PromoFilterCls promos=new PromoFilterCls();
+      return promos.getFilteredPromos(pConfig.currentOpp, 
+                        this.recurringOriginalPayment,
+                        this.upfrontOriginalPayment,
+                        cart,
+                        integer.valueOf(pConfig.currentOpp.Number_of_Users__c)
+                        /* The number of users get updated when user change it in the information center */);
+      /*
+      Warning! limitation
+      JSONGenerator gen = JSON.createGenerator(true);
+          gen.writeStartObject();
+          gen.writeObjectField('promotionList',thanksPriya);
+          gen.writeEndObject();
+          return gen.getAsString();
+          */
+    }
+  }
+  
+  public string promoListStr{
+    get{
+      map<id,string> cart=new map<id,string>();
+      for (ProductMatrixObject pmo:pConfig.productShoppingCart.values()){
+        cart.put(pmo.sfdcId,pmo.productCode);
+      }
+      
+      PromoFilterCls promos=new PromoFilterCls();
+      map<string,map<id,Promotions__c>> thanksPriya=promos.getFilteredPromos(pConfig.currentOpp, 
+                            this.recurringOriginalPayment,
+                            this.upfrontOriginalPayment,
+                            cart,
+                            integer.valueOf(pConfig.currentOpp.Number_of_Users__c)
+                            /* The number of users get updated when user change it in the information center */);
+      /*
+      Warning! limitation
+      */
+      JSONGenerator gen = JSON.createGenerator(true);
+          gen.writeStartObject();
+          gen.writeObjectField('promotionList',thanksPriya);
+          gen.writeEndObject();
+          system.debug(loggingLevel.WARN,'***promotionList');
+          system.debug(loggingLevel.WARN,gen.getAsString());
+          system.debug(loggingLevel.WARN,'***promotionList');
+          return gen.getAsString();
+          
+    }
+  }
+  
+  public string packageMapJSON {
+    get{
+      map<string/*classification*/,map<string,ProductMatrixObject>> pMatrix=
+        new map<string/*classification*/,map<string,ProductMatrixObject>>();
+      
+      for (string pClass:pConfig.productMatrix.keySet()){
+        
+        if (!pMatrix.containsKey(pClass))
+          pMatrix.put(pClass,new map<string,ProductMatrixObject>());
+          
+        for (ProductMatrixObject pmo:pConfig.productMatrix.get(pClass).values()){
+          if (pConfig.bizObj.isValidLicenseUnit(pmo.sfdcId,pConfig.currentOpp.m_License_Unit__c)&&
+            pConfig.bizObj.isPackageForSelectedNumUsers(pmo.sfdcId,
+                              integer.valueOf(pConfig.currentOpp.Number_of_Users__c))&&
+            pConfig.bizObj.isPackageForSelectedContractTerms(pmo.sfdcId,
+                              integer.valueOf(pConfig.currentOpp.Contract_Term__c))){
+            pMatrix.get(pClass).put(pmo.sfdcId,pmo.clone());
+          }
+        }
+      }
+      
+      return JSON.serialize(pMatrix);
+    }
+  }
+  
+  public string alaCarteJSON {
+    get{
+      return JSON.serialize(pConfig.aLaCarteIds);
+    }
+  }
+  
+  public list<Product2> getProductListByKeyword(){
+    
+    if (stage!=3&&stage!=1) return new List<Product2>();
+    
+    map<Id,Product2> p2=new map<Id,Product2>();
+    //list<Product2> additionalProducts=new list<Product2>();
+    string subProduct=searchProduct.Sub_Product__c;
+    string productLine=searchProduct.Product_Line_NS__c;
+    
+    if (isSearchByKeyword){ 
+      productKeyword=ApexPages.currentPage().getParameters().get('inputProductKeyword');
+      // Changed by Anupam - Search string to be atleast 3 chars long
+      if (productKeyword.length()<3){
+        pConfig.addCommonMessage(ApexPages.Severity.WARNING,'Please input at least 3 characters.');
+        return new List<Product2>();
+      }
+      
+      if (productKeyword!=''){ 
+        string pk='%' + productKeyword.trim() + '%';
+        p2=new map<Id,Product2>([Select p.ProductCode, p.m_Package_Type__c, p.Name, p.Id, p.Family, p.Description From Product2 p
+            where p.IsActive=true and p.Can_be_Sold__c=true and p.Is_Package__c<>true and ((p.Description like :pk) or (p.ProductCode like :pk) or (p.Name like :pk)) order by p.Description limit 100]);
+      }  
+    }
+    else if(subProduct!=null&&productLine!=null&&!isSearchByKeyword) {
+      
+      if((subProduct!=''&&productLine!='')) {
+        /*
+        if(subProduct==''&&productLine!=''){
+          p2=new map<Id,Product2>([Select p.ProductCode, p.m_Package_Type__c, p.Name, p.Id, p.Family, p.Description From Product2 p
+                       where p.IsActive=true and p.Is_Package__c<>true and p.Product_Line_NS__c=:productLine order by p.Name]);
+                         
+        }
+        else if(subProduct!=''&&productLine==''){
+          p2=new map<Id,Product2>([Select p.ProductCode, p.m_Package_Type__c, p.Name, p.Id, p.Family, p.Description From Product2 p
+                       where p.IsActive=true and p.Is_Package__c<>true and p.Sub_Product__c=:subProduct order by p.Name]);
+                         
+        
+        }
+        else if(subProduct!=''&&productLine!=''){
+        */
+        p2=new map<Id,Product2>([Select p.ProductCode, p.m_Package_Type__c, p.Name, p.Id, p.Family, p.Description From Product2 p
+                       where p.IsActive=true and p.Can_be_Sold__c=true and p.Is_Package__c<>true and p.Product_Line_NS__c=:productLine and 
+                           p.Sub_Product__c=:subProduct order by p.Description]);
+        
+      }
+    }
+    
+    /* Verify if the product has valid UOM */
+    //map<string,ProductMatrixObject> tempProductMap=productMap(new set<string>());
+    for (string pct2:p2.keySet()){
+      if (!pConfig.productMap.containsKey(pct2)){
+        p2.remove(pct2);
+      }
+    }
+    
+    return p2.values();
+  }
+  
+  public List<SelectOption> getProductClassifications() {
+        List<SelectOption> options = new List<SelectOption>();
+       
+        /* Changed by Anupam- based on Sarat's new request - display only the package classifications with only packages inside it */
+        for (string pClass:pConfig.productMatrix.keySet()){
+           boolean isValidPackageClass = false;
+          if (pClass!='Misc'){
+            for (ProductMatrixObject pmo:pConfig.productMatrix.get(pClass).values()){
+              if (pConfig.bizObj.isValidLicenseUnit(pmo.sfdcId,pConfig.currentOpp.m_License_Unit__c)){
+                isValidPackageClass=true;
+                break;        
+              }    
+            }
+          }
+          if (isValidPackageClass){
+            options.add(new SelectOption(pClass,pClass)); 
+          }
+          
+        }
+        options.sort();
+    return options; 
+    }
+  
+  public Opportunity CurrentOpp{
+    get{
+      return pConfig.currentOpp;
+    }
+  }
+  
+  public string recurringPromotionDiscount {
+    get{
+      decimal op=(recurringOriginalPayment-decimal.valueOf(recurringShoppingCartSubtotal.replace(',','')));
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  public string recurringPromotionPercentageDiscount {
+    get{
+      decimal op=0;
+      
+      if (recurringOriginalPayment==0)
+        return '0.00';
+      op=(decimal.valueOf(recurringPromotionDiscount.replace(',',''))/recurringOriginalPayment)*100;
+      //op=Math.round(op,2);
+      //op=op.setScale(2);
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  public string upfrontPromotionDiscount {
+    get{
+      decimal op=upfrontOriginalPayment-decimal.valueOf(upfrontShoppingCartSubtotal.replace(',',''));
+      
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  public string upfrontPromotionPercentageDiscount {
+    get{
+      decimal op=0.00;
+      
+      if (upfrontOriginalPayment==0)
+        return '0.00';
+        
+      op=(decimal.valueOf(upfrontPromotionDiscount.replace(',',''))/upfrontOriginalPayment)*100;
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  public string recurringShoppingCartSubtotal{
+    get{
+      decimal op=0.00;
+      for (ProductMatrixObject pmo:pConfig.productShoppingCart.values()){
+        op+=(pmo.recurringPayment);
+      }
+      
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  public string recurringShoppingCartTotal{
+    get{
+      decimal op=decimal.valueOf(recurringShoppingCartSubtotal.replace(',',''))*currentOpp.Contract_Term__c;
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  
+  public string listPriceShoppingCartSubtotal{
+    get{
+      decimal op=0.00;
+      for (ProductMatrixObject pmo:pConfig.productShoppingCart.values()){
+        op+=(pmo.price);
+      }
+      
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  public string upfrontShoppingCartSubtotal{
+    get{
+      decimal op=0.00;
+      for (ProductMatrixObject pmo:pConfig.productShoppingCart.values()){
+        op+=(pmo.upfrontPayment);
+      }
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }  
+  
+  public string upfrontOriginalPaymentStr{
+    get{
+      decimal op=upfrontOriginalPayment;
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  public string recurringOriginalPaymentStr{
+    get{
+      decimal op=recurringOriginalPayment;
+      list<string> args = new string[]{'0','number','###,###,##0.00'};
+      return string.format(op.setScale(2).format(), args)+
+          (string.format(op.setScale(2).format(), args).indexOf('.')<0?'.00':'');
+    }
+  }
+  
+  @RemoteAction
+  global static String netSuiteCall(String addr,String companyId, String userName, string pwd, string body){
+    /*CommonObj.CommonLib op=new CommonObj.CommonLib();
+    string str=op.netSuiteIntegration(addr,companyId,userName,pwd,body);
+    return str;
+    */
+    return '';
+  }
+  
+}

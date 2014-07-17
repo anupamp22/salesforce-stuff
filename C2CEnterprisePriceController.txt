@@ -1,0 +1,1087 @@
+/*****************************
+Author: Anupam Priyadarshi
+Title: Price Controller for Configurator
+Description:This generates and retrieves various price points, promotions/discounts for configurator
+Ref#: 
+Open Issues (remove when resolved): N/A
+Usage:
+See test Method.
+API Version: 26.0
+11.08.2012 Added Customer specific pricing logic
+11.14.2012 Added the Upfront and Recurring payment logic
+11.16.2012 Added the verification for licenseUnit
+11.16.2012 Added the promotion/discount logic
+11.21.2012 Debugged and fixed issue pertaining to promotions
+12.01.2012 Fixed Promotion specific bug(Accumulated promotions)
+12.11.2012 Fixed the UAT issue for accountRegion as USA, Canada
+12.20.2012 Fixed the customer specific pricing and con-customer specific pricing issue
+01.01.2013 Creating a new set to filter the products based on their active price schedules
+01.11.2013 Fixed a promotion specific bug specific to % on products related
+01.14.2013 Added a new relatedAccountList Object based on Sarat's request
+01.28.2013 Added a fix to aply discount on upfront payment based on orderAmount
+02.14.2013 Added the product schedule history log related changes
+03.05.2013 Added the deletion of PS configs and details objects for linear and flat pricing
+03.05.2013 Added max discount related changes
+03.12.2013 Added a fix for customer specific pricing and enhanced logic for max discount
+03.15.2013 Cloning PPSchedule, configs, details functionality added
+03.22.2013 Upfront amount Orderlimit related promotion changes
+04.04.2014 Reverting back the function fetchPricingForProduct to old version
+04.04.2014 Removing transient from the pricing maps
+04.15.2014 Removing licenseUnit checks from PPS and including it in priceObject
+***************************************************/
+global class C2CEnterprisePriceController extends CommonObj implements CommonObj.IPricingCalculator{
+  public ApexPages.StandardController m_sc {get;set;}  
+  public string accountId {get;set;}
+  public string accountRegion {get;set;}
+  public string licenseUnit {get;set;}
+  public integer licenseQty {get;set;}  
+    
+  public  set<string> relatedAccountSet {get;set;}  
+  public  set<string> setOfProductWithActivePricing {get;set;}
+  public  map<string,map<string,m_Product_Price_Schedule__c>> pricingScheduleMap{get;set;}
+  public  map<string, map<string,m_Product_Price_Schedule_Details__c>> pricingScheduleDetailsMap{get;set;}
+  //public map<string, map<string,m_Product_Price_Schedule_Config__c>> pricingScheduleConfigMap{get;set;}
+  public  map<Id, Promotions__c> promotionMap {get;set;}
+  public  map<string, set<string>> promoProductMap {get;set;}
+  //public list<m_Product_Price_Schedule__History> PriceScheduleHistory {get;set;}
+  public string[] develoerEmails = new string[]{'anupam.priyadarshi@mitchell.com'};
+  
+  
+  /*max discount related changes*/
+  global class priceObject{
+    public string ppsId;
+    public string priceType;
+    public string licenseUnit;
+    public string paymentType;
+    public decimal listPrice;
+    public decimal maxDiscountPercentage;
+    public priceObject(){}
+    public priceObject(string ppsId, string priceType, string licenseUnit, string paymentType, decimal listPrice, decimal maxDiscountPercentage){
+      this.ppsId = ppsId;
+      this.priceType=priceType;
+      this.licenseUnit=licenseUnit;
+      this.paymentType=paymentType;
+      this.listPrice = listPrice;
+      this.maxDiscountPercentage = maxDiscountPercentage;
+    }    
+  }
+    
+  public C2CEnterprisePriceController(){  
+  }
+  /* constructor for the controller*/
+  public C2CEnterprisePriceController(ApexPages.StandardController controller){
+    m_sc = controller;
+  }
+  /* constuctor for getting the user license details */
+  public C2CEnterprisePriceController(integer licenseQty){
+    this.licenseQty= licenseQty;  
+    //initPricingMap();
+  }
+  
+  /* constructor for getting the account details from opportunity for the pricing need based on the account type*/
+  public C2CEnterprisePriceController(string accountId, string billingCountry, string licenseUnit, integer licenseQty){
+    this.accountId = accountId;
+    /* Fixed the UAT issue for accountRegion as USA, Canada */
+    if (billingCountry =='US' ||  billingCountry =='USA'){
+      this.accountRegion = 'US';
+    }
+    else if (billingCountry =='CAN' ||  billingCountry =='CA' || billingCountry =='Canada')
+    {
+      this.accountRegion = 'Canada';
+    }
+    else {
+      this.accountRegion = 'International';
+    } //end of hack
+    this.licenseUnit = licenseUnit;
+    this.licenseQty = licenseQty;
+    relatedAccountSet = new Set<string>{this.accountId};
+    setOfProductWithActivePricing = new set<string>();
+    initPricingMap();    
+  }
+  
+  /*initialize pricing maps*/
+  private void initPricingMap() {
+    buildAccountsRelationship();
+    buildSetOfProductWithActivePricing();
+    buildPromotionMap();
+    buildPromoProductMap();    
+  }
+  
+  public void loadPricingMap(map<string,PriceScheduleType> priceScheduleTypeObj){
+    buildPricingScheduleMapForSelectedProducts(priceScheduleTypeObj);
+    buildPricingScheduleDetailsMapForSelectedProducts(priceScheduleTypeObj);    
+  }
+  
+  public PageReference save(){
+    try { 
+      m_Product_Price_Schedule__c ppsc = 
+        (m_Product_Price_Schedule__c) m_sc.getRecord();
+      
+      if (ppsc.Price_Type__c=='Flat'||ppsc.Price_Type__c=='Linear'){
+        /*Ensure no tiered pricing configs or details exisits*/
+        deletePricingScheduleConfigs(ppsc.Id);
+        deletePricingScheduleDetails(ppsc.Id);        
+        if (ppsc.Price__c==null)
+          ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.FATAL,'Unit Price is required.'));          
+      }
+      
+      if (ApexPages.hasMessages())
+        return null;
+      upsert ppsc;
+      return new PageReference('/'  + ppsc.Id);
+    }
+    catch(Exception ex){
+      ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.FATAL,ex.getMessage()));
+      return null;    
+    }    
+  }  
+  
+  public PageReference clonePriceSchedule(){
+    m_Product_Price_Schedule__c newppsc;
+    Savepoint sp = Database.setSavePoint();
+    try{
+      m_Product_Price_Schedule__c currentppsc = (m_Product_Price_Schedule__c) m_sc.getRecord();
+      //string soql = ProdRelTraverseUtil.getCreatableFieldSQLs('m_Product_Price_Schedule__c', 'id=\''+currentppscId.id+'\'');
+      //m_Product_Price_Schedule__c currentppsc = (m_Product_Price_Schedule__c)Database.query(soql);
+      newppsc = currentppsc.clone(false);
+      newppsc.Status__c ='Inactive';
+      insert newppsc;
+      
+      //copy the related config lists
+      list<m_Product_Price_Schedule_Config__c> newConfigList = new list<m_Product_Price_Schedule_Config__c>();
+      for(m_Product_Price_Schedule_Config__c config: [SELECT Id,m_License_Unit__c, m_License_Unit_Min__c, m_License_Unit_Max__c, m_Base_Recurring_Price__c, m_Increment_Recurring_Price__c FROM m_Product_Price_Schedule_Config__c WHERE Product_Price_Schedule__c=:currentppsc.Id]){
+        m_Product_Price_Schedule_Config__c newConfig = config.clone(false);
+        newConfig.Product_Price_Schedule__c = newppsc.Id;
+        newConfigList.add(newConfig);
+      }
+      insert newConfigList;
+      
+      //copy the price schedule details
+      list<m_Product_Price_Schedule_Details__c> newDetailsList = new list<m_Product_Price_Schedule_Details__c>();
+      for(m_Product_Price_Schedule_Details__c pDetails:[SELECT Id,License_Unit__c, License_Quantity__c, Price_Type__c, Unit_Price__c, Total_Price__c FROM m_Product_Price_Schedule_Details__c WHERE Product_Price_Schedule__c=:currentppsc.Id]){
+        m_Product_Price_Schedule_Details__c newDetails = pDetails.clone(false);
+        newDetails.Product_Price_Schedule__c = newppsc.Id;
+        newDetailsList.add(newDetails);
+      }
+      insert newDetailsList;      
+    }
+    catch(Exception ex){
+      Database.rollback(sp);
+      ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.FATAL,ex.getMessage()));
+      return null;
+    }
+    return new PageReference('/'  + newppsc.Id+'/e');    
+  }
+  
+  
+  /* Generates the Pricing Schedule Details based on the pricing schedule config 
+   * This is being used when pricing type is 'Tiered'   
+   */  
+  public PageReference generatePricingScheduleDetailsForTiered(){
+    try{
+         
+         m_Product_Price_Schedule__c ppsc = 
+                (m_Product_Price_Schedule__c) m_sc.getRecord();
+        deletePricingScheduleDetails(ppsc.Id);
+      
+          List<m_Product_Price_Schedule_Details__c> scheduleDetailsObjectList = new List<m_Product_Price_Schedule_Details__c>();
+          for(m_Product_Price_Schedule_Config__c config:[SELECT Id, Product_Price_Schedule__c, m_License_Unit__c, m_License_Unit_Min__c,m_License_Unit_Max__c,m_Base_Recurring_Price__c,m_Increment_Recurring_Price__c 
+                                 FROM m_Product_Price_Schedule_Config__c
+                                                         WHERE Product_Price_Schedule__c=:ppsc.Id])
+          {
+            for(integer iNum=(Integer)config.m_License_Unit_Min__c; iNum<=config.m_License_Unit_Max__c; iNum++)
+            {
+              m_Product_Price_Schedule_Details__c scheduleDetailsObject = new m_Product_Price_Schedule_Details__c();
+              scheduleDetailsObject.Product_Price_Schedule__c = config.Product_Price_Schedule__c;
+              scheduleDetailsObject.License_Unit__c = config.m_License_Unit__c;
+              scheduleDetailsObject.License_Quantity__c = iNum;
+              scheduleDetailsObject.Total_Price__c = (Decimal)config.m_Base_Recurring_Price__c+iNum*(Decimal)config.m_Increment_Recurring_Price__c;
+              scheduleDetailsObject.Unit_Price__c =  (scheduleDetailsObject.Total_Price__c)/(scheduleDetailsObject.License_Quantity__c);
+              scheduleDetailsObject.Price_Type__c=ppsc.Price_Type__c;
+              scheduleDetailsObjectList.add(scheduleDetailsObject);                            
+            }
+          }
+          insert scheduleDetailsObjectList;
+        return new PageReference('/'  + ppsc.Id);
+    }
+    catch(Exception ex){
+      ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.FATAL,ex.getMessage()));
+      return null;
+    }    
+  }
+  
+  /*private decimal calculateRealTimeTieredPricing(string product2Id, string licenseUnit, integer Qty){
+    decimal price=0;
+    for (m_Product_Price_Schedule__c mps:pricingScheduleMap.get(product2Id).values()){
+      if (mps.m_License_Unit_Min__c<=Qty && Qty <= mps.m_License_Unit_Max__c){
+        return (Decimal)mps.m_Base_Recurring_Price__c+Qty*(Decimal)config.m_Increment_Recurring_Price__c;
+      }      
+    }
+    return price;
+  }*/
+  
+  /*private decimal calculateRealTimeCurvePricing(string product2Id, string licenseUnit, integer Qty){
+    decimal totalprice=0;
+    for (m_Product_Price_Schedule__c mps:pricingScheduleMap.get(product2Id).values()){
+      //for (Integer iNum=(Integer)ppsc.Curve_Base_LU_Quantity__c; iNum<=Qty; iNum=iNum+(Integer)ppsc.Curve_Increment_LU_Quantity__c){
+          totalPrice = (ppsc.Curve_Base_Recurring_Price__c)*(1-ppsc.Curve_Base_Discount_Percent__c/100)
+            +((ppsc.Curve_Increment_Recurring_Price__c)*(Qty-ppsc.Curve_Base_LU_Quantity__c)
+            *(1-ppsc.Curve_Increment_Discount__c/100)
+            *(Math.pow((Double)(1-ppsc.Curve_Incr_Disc_Rate_of_Increase_Percent__c/100),(Double)(Qty-ppsc.Curve_Base_LU_Quantity__c))));
+          return   totalPrice;
+          //unitPrice=totalPrice/Qty;
+      
+      //}
+    
+    }
+
+  }*/
+  
+  
+  /* Deletes the existing records from Product Price Schedule Details Object
+   *   
+   */
+  public void deletePricingScheduleDetails(Id ppscId){
+    try{
+      /*m_Product_Price_Schedule__c ppsc = 
+                (m_Product_Price_Schedule__c) m_sc.getRecord();*/
+      List<m_Product_Price_Schedule_Details__c> deleteList = [SELECT Id FROM m_Product_Price_Schedule_Details__c WHERE Product_Price_Schedule__c=:ppscId];
+      if (deleteList!=null && deleteList.size()>0)
+      {
+        delete deleteList;
+      }
+    }
+    catch(Exception ex){
+      ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.FATAL,ex.getMessage()));      
+    }    
+  }
+  
+  /* Deletes the existing records from Product Price Schedule Config Object */
+  public void deletePricingScheduleConfigs(Id ppscId){
+    try{
+      /*m_Product_Price_Schedule__c ppsc = 
+                (m_Product_Price_Schedule__c) m_sc.getRecord();*/
+      List<m_Product_Price_Schedule_Config__c> deleteList = [SELECT Id FROM m_Product_Price_Schedule_Config__c WHERE Product_Price_Schedule__c=:ppscId];
+      if (deleteList!=null && deleteList.size()>0)
+      {
+        delete deleteList;
+      }
+    }
+    catch(Exception ex){
+      ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.FATAL,ex.getMessage()));      
+    }    
+  }  
+  
+  /* Generates the pricing schedule details when price type is Curve
+     * Variables are: No of users alone.
+     */    
+  public PageReference generatePricingScheduleDetailsForCurve()
+  {
+    try{
+        
+        m_Product_Price_Schedule__c ppsc = 
+                  (m_Product_Price_Schedule__c) m_sc.getRecord();        
+        deletePricingScheduleDetails(ppsc.Id);
+        Decimal totalPrice=0;
+        Decimal unitPrice=0;
+        List<m_Product_Price_Schedule_Details__c> scheduleDetailsObjectList = new List<m_Product_Price_Schedule_Details__c>();
+        for (Integer iNum=(Integer)ppsc.Curve_Base_LU_Quantity__c; iNum<=20; iNum=iNum+(Integer)ppsc.Curve_Increment_LU_Quantity__c)
+        {
+          totalPrice = (ppsc.Curve_Base_Recurring_Price__c)*(1-ppsc.Curve_Base_Discount_Percent__c/100)
+                +((ppsc.Curve_Increment_Recurring_Price__c)*(iNum-ppsc.Curve_Base_LU_Quantity__c)
+                *(1-ppsc.Curve_Increment_Discount__c/100)
+                *(Math.pow((Double)(1-ppsc.Curve_Incr_Disc_Rate_of_Increase_Percent__c/100),(Double)(iNum-ppsc.Curve_Base_LU_Quantity__c))));
+                
+          unitPrice=totalPrice/iNum;
+          
+          m_Product_Price_Schedule_Details__c scheduleDetailsObject = new m_Product_Price_Schedule_Details__c();
+          scheduleDetailsObject.Total_Price__c = totalPrice;
+          scheduleDetailsObject.Unit_Price__c= unitPrice;
+          scheduleDetailsObject.Product_Price_Schedule__c = ppsc.id;
+          scheduleDetailsObject.License_Quantity__c = iNum;
+          scheduleDetailsObject.License_Unit__c=ppsc.Curve_License_Unit__c;
+          scheduleDetailsObject.Price_Type__c=ppsc.Price_Type__c;
+          scheduleDetailsObjectList.add(scheduleDetailsObject);
+        }
+        insert scheduleDetailsObjectList;
+        return new PageReference('/'  + ppsc.Id);
+    }
+    catch(Exception ex){
+      ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.FATAL,ex.getMessage()));
+      return null;
+    }    
+  }
+  
+  /* Generates the pricing schedule details when price type is Curve
+     * Variables are: Number of Users, & No of Contract terms
+     */    
+  public PageReference generatePricingScheduleDetailsForCurveBasedOnTerms()
+  {
+    try{
+        
+        m_Product_Price_Schedule__c ppsc = 
+                  (m_Product_Price_Schedule__c) m_sc.getRecord();
+        deletePricingScheduleDetails(ppsc.Id);
+        
+        Decimal totalPrice=0;
+        Decimal unitPrice=0;
+        List<m_Product_Price_Schedule_Details__c> scheduleDetailsObjectList = new List<m_Product_Price_Schedule_Details__c>();
+        for (Integer iNum=(Integer)ppsc.Curve_Base_LU_Quantity__c; iNum<=20; iNum=iNum+(Integer)ppsc.Curve_Increment_LU_Quantity__c)
+        {
+          totalPrice = (ppsc.Curve_Base_Recurring_Price__c)*(Math.Pow((Double)(1-ppsc.Curve_Base_Discount_Percent__c/100),(Double)ppsc.Curve_Base_Term_Qty__c/12))
+                +((ppsc.Curve_Increment_Recurring_Price__c)*(iNum-ppsc.Curve_Base_LU_Quantity__c)
+                *(1-ppsc.Curve_Increment_Discount__c/100)
+                *(Math.pow((Double)(1-ppsc.Curve_Incr_Disc_Rate_of_Increase_Percent__c/100),(Double)(iNum-ppsc.Curve_Base_LU_Quantity__c))
+                *(Math.Pow((Double)(1-ppsc.Curve_Base_Discount_Percent__c/100),(Double)ppsc.Curve_Base_Term_Qty__c/12))));
+                
+          unitPrice=totalPrice/iNum;
+          
+          m_Product_Price_Schedule_Details__c scheduleDetailsObject = new m_Product_Price_Schedule_Details__c();
+          scheduleDetailsObject.Total_Price__c = totalPrice;
+          scheduleDetailsObject.Unit_Price__c= unitPrice;
+          scheduleDetailsObject.Product_Price_Schedule__c = ppsc.id;
+          scheduleDetailsObject.License_Quantity__c = iNum;
+          scheduleDetailsObject.License_Unit__c=ppsc.Curve_License_Unit__c;
+          scheduleDetailsObject.Price_Type__c=ppsc.Price_Type__c;
+          scheduleDetailsObjectList.add(scheduleDetailsObject);
+        }
+        insert scheduleDetailsObjectList;
+        return new PageReference('/'  + ppsc.Id);
+    }
+    catch(Exception ex){
+      ApexPages.addMessage(new ApexPages.Message(ApexPages.Severity.FATAL,ex.getMessage()));
+      return null;
+    }    
+  }
+    
+    @isTest(SeeAllData=true)
+    static void test(){
+      C2CEnterprisePriceController cx = new C2CEnterprisePriceController('001300000099uCE', 'Canada', 'User', 3);
+      map<string,PriceScheduleType> pstList=new map<string,PriceScheduleType>();
+      pstList.put('01t60000002pMooAAE',new PriceScheduleType('01t60000002pMooAAE','User',5));
+      cx.loadPricingMap(pstList);
+      //decimal priceForShopClock = cx.fetchPricingForProduct('01t60000002pMooAAE', 'User', 5);
+      priceObject po = cx.fetchPricingObjectForProduct('01t60000002pMooAAE', 'User', 5);
+      system.debug('Anupam is printing price for RC FIX Auto Canada for COX Auto Body:::'+po.listprice);    
+      
+    }
+     
+     /* Builds the price Schedule Map for selected products only; this was created to optimize and solve view state issue*/
+     private void buildPricingScheduleMapForSelectedProducts(map<string,PriceScheduleType> priceScheduleTypeObj){
+      pricingScheduleMap = new map<string, map<string,m_Product_Price_Schedule__c>>();
+      date todayDate = Date.today();
+      for(m_Product_Price_Schedule__c psd: [Select m.Term_Unit__c, m.Status__c, m.Start_Date__c, m.Product__r.Id, m.Price__c, 
+                              m.Price_Type__c, m.License_Unit__c, m.License_Unit_Min__c,m.Payment_Type__c, 
+                              m.License_Unit_Max__c, m.Id, m.End_Date__c, m.Account_ID__r.Id, m.Region__c, Max_discount__c
+                              From m_Product_Price_Schedule__c m
+                              WHERE m.Product__r.Id in :priceScheduleTypeObj.keySet()
+                              AND m.status__c='ACTIVE'
+                              AND m.Product__r.IsActive = true
+                              AND m.Region__c=:accountRegion
+                              AND m.start_date__c <= :todayDate
+                              AND m.end_date__c >= :todayDate
+                              AND (m.Account_ID__r.Id = null or m.Account_ID__r.Id in :relatedAccountSet)]){
+          
+          PriceScheduleType pstype = priceScheduleTypeObj.get(psd.Product__r.Id);
+          //if (pstype.licenseUnit !=null && pstype.licenseUnit==psd.License_Unit__c){  
+            if (!pricingScheduleMap.containsKey(psd.Product__r.Id)){
+              pricingScheduleMap.put(psd.Product__r.Id, new map<string,m_Product_Price_Schedule__c>());
+            }
+              map<string,m_Product_Price_Schedule__c> mpsd = pricingScheduleMap.get(psd.Product__r.Id);
+            mpsd.put(psd.Id, psd);
+            pricingScheduleMap.put(psd.Product__r.Id,mpsd);
+          //}         
+      }
+     }
+     
+      /* Builds the price Schedule Details Map for selected products only; this was created to optimize and solve view state issue*/
+      private void buildPricingScheduleDetailsMapForSelectedProducts(map<string,PriceScheduleType> priceScheduleTypeObj){
+      pricingScheduleDetailsMap = new map<string, map<string,m_Product_Price_Schedule_Details__c>>();
+      date todayDate = Date.today();
+      for(m_Product_Price_Schedule_Details__c psd: [Select m.Id, m.Product_Price_Schedule__r.Id, m.Product_Price_Schedule__r.Product__r.Id, 
+                              m.Unit_Price__c, m.Total_Price__c,m.Product_Price_Schedule__r.Region__c, 
+                              m.Price_Type__c, m.Name, m.License_Unit__c, m.License_Quantity__c 
+                              From m_Product_Price_Schedule_Details__c m
+                              WHERE m.Product_Price_Schedule__r.Product__r.Id in :priceScheduleTypeObj.keySet()
+                              AND m.Product_Price_Schedule__r.status__c='ACTIVE'
+                              AND m.Product_Price_Schedule__r.Product__r.IsActive=true
+                              AND m.Product_Price_Schedule__r.Region__c=:accountRegion
+                              AND m.Product_Price_Schedule__r.start_date__c <= :todayDate
+                              AND m.Product_Price_Schedule__r.end_date__c >= :todayDate
+                              AND (m.Product_Price_Schedule__r.Account_ID__r.Id = null or m.Product_Price_Schedule__r.Account_ID__r.Id in :relatedAccountSet)]){
+        /*if (!priceScheduleTypeObj.containsKey(psd.Product_Price_Schedule__r.Product__r.Id)){
+          continue;
+        }*/
+        PriceScheduleType pstype = priceScheduleTypeObj.get(psd.Product_Price_Schedule__r.Product__r.Id);
+        
+        //if (pstype.licenseUnit !=null && pstype.licenseQty!=null){  
+        //if (psd.License_Unit__c==pstype.licenseUnit && psd.License_Quantity__c==pstype.licenseQty){
+          //if (pstype.licenseUnit !=null && pstype.licenseUnit==psd.License_Unit__c){            
+            if (!pricingScheduleDetailsMap.containsKey(psd.Product_Price_Schedule__r.Product__r.Id)){
+              pricingScheduleDetailsMap.put(psd.Product_Price_Schedule__r.Product__r.Id, new map<string,m_Product_Price_Schedule_Details__c>());
+            }
+              map<string,m_Product_Price_Schedule_Details__c> mpsd = pricingScheduleDetailsMap.get(psd.Product_Price_Schedule__r.Product__r.Id);
+            mpsd.put(psd.Id, psd);
+            pricingScheduleDetailsMap.put(psd.Product_Price_Schedule__r.Product__r.Id,mpsd);
+        //}              
+        //}
+        //}
+    }     
+    }    
+    
+   /* Builds all the related accounts */
+   private void buildAccountsRelationship(){
+      for (Account_Relationship__c ar: [Select m.Related_Account__r.Id,m.Related_Account_Role__c 
+                           from Account_Relationship__c m
+                                        where m.Account__c=:accountId]){
+             relatedAccountSet.add(ar.Related_Account__r.Id);          
+          }  
+          for (Account_Relationship__c ar: [Select m.Account__r.Id,m.Account_Role__c 
+                           from Account_Relationship__c m
+                                        where m.Related_Account__c=:accountId]){
+             relatedAccountSet.add(ar.Account__r.Id);          
+          }         
+   }
+   
+        
+
+  /* Builds a set of productIds if there is active pricing exists */
+  private void buildSetOfProductWithActivePricing(){
+      date todayDate = Date.today();
+    for(m_Product_Price_Schedule__c psd: [Select m.Term_Unit__c, m.Status__c, m.Start_Date__c, m.Product__r.Id, m.Price__c, 
+                              m.Price_Type__c, m.License_Unit__c, m.License_Unit_Min__c,m.Payment_Type__c, 
+                              m.License_Unit_Max__c, m.Id, m.End_Date__c, m.Account_ID__r.Id, m.Region__c
+                              From m_Product_Price_Schedule__c m
+                              WHERE m.Region__c=:accountRegion
+                              //AND m.License_Unit__c=:licenseUnit
+                              AND m.status__c='ACTIVE'
+                              AND m.Product__r.IsActive = true
+                              AND m.start_date__c <= :todayDate
+                              AND m.end_date__c >= :todayDate                              
+                              AND (m.Account_ID__r.Id = null or m.Account_ID__r.Id in :relatedAccountSet)]){
+          setOfProductWithActivePricing.add(psd.Product__r.Id);                                
+        }         
+    
+  } 
+  
+
+   
+  /* new- returns the customer specific pricing if applicable else returns standard pricing */
+   public decimal fetchPricingForProduct(string product2Id, string licenseUnit, integer pLicenseQty){
+         list<decimal> pricepoints= new list<decimal>();
+         decimal tempPrice=0;
+         decimal price=-1;
+         try
+         {
+           //Fixed the customer specific pricing and con-customer specific pricing issue
+           boolean hasCustomerPricingOnThisAccount = false;
+           boolean hasGeneralPricing = false;
+           for(m_Product_Price_Schedule__c ps:pricingScheduleMap.get(product2Id).values()){
+             if (ps.License_Unit__c==licenseUnit){
+               if (ps.Account_ID__r.Id !=null){
+                 for(string acctId:relatedAccountSet){
+                   if (ps.Account_ID__r.Id==acctId){
+                     tempPrice = calculatePrice(ps.Product__r.Id,ps.Price_Type__c,ps.Price__c, pLicenseQty);
+                     pricepoints.add(tempPrice);
+                     hasCustomerPricingOnThisAccount=true;                     
+                     }                        
+                    }
+               }
+             }
+           }
+           if (hasCustomerPricingOnThisAccount){
+             pricepoints.sort();
+             price= pricepoints[0];
+                        
+           }
+           else
+           {
+             for(m_Product_Price_Schedule__c ps:pricingScheduleMap.get(product2Id).values()){
+               if (ps.License_Unit__c==licenseUnit){
+                 if (ps.Account_ID__r.Id ==null){
+                   price = calculatePrice(ps.Product__r.Id,ps.Price_Type__c,ps.Price__c, pLicenseQty);
+                   hasGeneralPricing = true;
+                 }
+               }
+             }           
+             
+           }  
+           return price;
+         }
+         catch(Exception ex){
+           system.debug(ex);
+           return price;
+         }
+  }
+  
+  
+  /* Max discount related changes */
+   public priceObject fetchPricingObjectForProduct(string product2Id, string licenseUnit, integer pLicenseQty){
+         list<decimal> pricepoints= new list<decimal>();
+         decimal tempPrice=0;
+         decimal price=-1;
+         priceObject pObject = null;
+         priceObject custPriceObj = null;
+         map<string,priceObject> sMap = new map<string,priceObject>();
+         try
+         {
+           //Fixed the customer specific pricing and con-customer specific pricing issue
+           boolean hasCustomerPricingOnThisAccount = false;
+           boolean hasGeneralPricing = false;
+           for(m_Product_Price_Schedule__c ps:pricingScheduleMap.get(product2Id).values()){
+             //if (ps.License_Unit__c==licenseUnit){
+               if (ps.Account_ID__r.Id !=null){
+                 for(string acctId:relatedAccountSet){
+                   if (ps.Account_ID__r.Id==acctId){
+                     tempPrice = calculatePrice(ps.Product__r.Id,ps.Price_Type__c,ps.Price__c, pLicenseQty);
+                     pricepoints.add(tempPrice);
+                     hasCustomerPricingOnThisAccount=true;
+                     custPriceObj = new priceObject(ps.Id,ps.Price_Type__c,ps.License_Unit__c, ps.Payment_Type__c,tempPrice, ps.max_discount__c);
+                     sMap.put(acctId,custPriceObj);
+                   }                        
+                    }
+               }
+           //  }
+           }
+           if (hasCustomerPricingOnThisAccount){
+             // got the least price on to those accounts
+             pricepoints.sort();
+             price= pricepoints[0];
+             //now have to find the respective max discount percentage corresponding to that lowest price
+             for (priceObject po: sMap.values()){
+               if (po.listprice==price){
+                 pObject = new priceObject(po.ppsId,po.priceType,po.licenseUnit, po.paymentType,price, po.maxDiscountPercentage);  
+               }
+             }  
+                          
+           }
+           else
+           {
+             for(m_Product_Price_Schedule__c ps:pricingScheduleMap.get(product2Id).values()){
+               //if (ps.License_Unit__c==licenseUnit){
+                 if (ps.Account_ID__r.Id ==null){
+                   price = calculatePrice(ps.Product__r.Id,ps.Price_Type__c,ps.Price__c, pLicenseQty);
+                   pObject = new priceObject(ps.Id,ps.Price_Type__c,ps.License_Unit__c, ps.Payment_Type__c,price, ps.max_discount__c);
+                   hasGeneralPricing = true;
+                 }
+               //}
+             }           
+             
+           }  
+           return pObject;
+         }
+         catch(Exception ex){
+           system.debug(ex);
+           CommonLib lib = new CommonLib();
+           lib.notifyStandardExceptionViaEmail('Max discount related object, product2Id:'+product2Id,ex,new list<string>{'anupam.priyadarshi@mitchell.com'});           
+           return pObject;
+         }
+  }
+  
+  
+  
+  
+  /* Depracated-Max discount related changes*/
+   public priceObject fetchPricingObjectForProductOldVersion(string product2Id, string licenseUnit, integer pLicenseQty){
+         list<decimal> pricepoints= new list<decimal>();
+         decimal tempPrice=0;
+         decimal price=-1;
+         priceObject pObject = null;
+         try
+         {
+           for(m_Product_Price_Schedule__c ps:pricingScheduleMap.get(product2Id).values()){
+             //Fixed the customer specific pricing and con-customer specific pricing issue
+             boolean hasCustomerPricingOnThisAccount = false;
+             boolean hasGeneralPricing = false;
+             if (ps.License_Unit__c==licenseUnit){
+               if (ps.Account_ID__r.Id !=null){
+                 for(string acctId:relatedAccountSet){
+                   if (ps.Account_ID__r.Id==acctId){
+                     tempPrice = calculatePrice(ps.Product__r.Id,ps.Price_Type__c,ps.Price__c, pLicenseQty);
+                     pricepoints.add(tempPrice);                     
+                     }                        
+                    }
+                    if (pricepoints.size()>0){
+                      pricepoints.sort();
+                      price= pricepoints[0];
+                      hasCustomerPricingOnThisAccount=true;
+                      pObject = new priceObject(ps.Id,ps.Price_Type__c,ps.License_Unit__c, ps.Payment_Type__c,price, ps.max_discount__c);
+                      break;
+                    }
+                    /*else{
+                      hasCustomerPricingOnThisAccount = false;
+                    }*/
+                 } 
+            else
+            {
+              price = calculatePrice(ps.Product__r.Id,ps.Price_Type__c,ps.Price__c, pLicenseQty);
+              hasGeneralPricing = true;
+              pObject = new priceObject(ps.Id,ps.Price_Type__c,ps.License_Unit__c, ps.Payment_Type__c,price, ps.max_discount__c);
+            }       
+             }
+             
+             }   
+           
+           
+           return pObject;
+         }
+         catch(Exception ex){
+           system.debug(ex);
+           return pObject;
+         }
+  }
+  
+  /* Max discount related changes */
+  public decimal maxDiscountAppliedPricing(decimal listPrice, decimal discountedPrice, decimal maxDiscount)
+  {
+    decimal actualDiscount = (listPrice-discountedPrice)*100/listPrice;
+    if (actualDiscount>maxDiscount){
+      return listPrice*(1-maxDiscount/100);
+    }
+    return -1;
+  }
+  
+    /* Max discount related changes */
+  public boolean hasMaxDiscountReached(decimal listPrice, decimal discountedPrice, decimal maxDiscount)
+  {
+    return  true;
+  }
+  
+  /* determines what price to apply based on pricing type*/
+  private decimal calculatePrice(string ppsId, string priceType, decimal unitPrice, integer pLicenseQty){
+    decimal price=-1;
+    if (priceType=='Flat'){
+      price = unitPrice;
+    }
+    else if (priceType=='Linear'){    
+      price = unitPrice*pLicenseQty;
+    }
+    else if(priceType=='Tiered' || priceType=='Curve'){
+      for(m_Product_Price_Schedule_Details__c ppsd:pricingScheduleDetailsMap.get(ppsId).values()){
+        if(ppsd.License_Quantity__c==pLicenseQty){
+           price=ppsd.Total_Price__c;      
+        }
+      }
+    }
+    return price;    
+  }
+  
+  /* returns the upfront payment */
+  public decimal fetchUpfrontPayment(string product2Id, string licenseUnit, integer pLicenseQty){
+    decimal upfrontPayment =-1;
+    try{    
+      for (m_Product_Price_Schedule__c ps:pricingScheduleMap.get(product2Id).values()){
+        if (ps.Payment_Type__c=='Upfront')
+          upfrontPayment = fetchPricingForProduct(product2Id,licenseUnit, pLicenseQty);
+        else
+           upfrontPayment=0;
+      }      
+      return upfrontPayment;
+    }
+    catch(Exception ex){
+      system.debug(ex);
+      return upfrontPayment;
+    }    
+  }
+  
+  /* returns the recurring payment */
+  public decimal fetchRecurringPayment(string product2Id, string licenseUnit, integer pLicenseQty){
+    decimal recurringPayment=-1;
+    try{
+      for (m_Product_Price_Schedule__c ps:pricingScheduleMap.get(product2Id).values()){
+        if (ps.Payment_Type__c=='Recurring')
+          recurringPayment = fetchPricingForProduct(product2Id,licenseUnit, pLicenseQty);
+        else
+          recurringPayment=0;        
+      }
+      return recurringPayment;      
+    }
+    catch(Exception ex){
+      system.debug(ex);
+      return recurringPayment;
+    }        
+  }  
+    
+  /* Depracated-applying discount on upfront payment */
+  public decimal applyPromoOnUpfrontPayment(set<string> promoIDs,string product2Id, decimal upfrontPayment,integer licenseQty, integer termQty, decimal OrderAmount){
+    decimal discountPercentage =0;
+    string discountType;
+    decimal discountedUpfrontPayment=upfrontPayment;
+    try{
+      for(string promo:promoIDs){
+        Promotions__c promDetail = promotionMap.get(promo);
+        boolean isLicenseLimit = true;
+        boolean isTermLimit = true;
+        boolean isOrderLimit= true;
+      
+        
+        if (promDetail.Enforce_Licnese_Limits__c) {
+          if (promDetail.License_Min__c > licenseQty || licenseQty > promDetail.License_Max__c) 
+               isLicenseLimit = false;
+        }
+        if (promDetail.Enforce_Term_Limits__c) {
+          if (promDetail.Term_Min__c > termQty || termQty > promDetail.Term_Max__c) 
+               isTermLimit=false;
+        }
+        if (promDetail.Enforce_Order_Limit__c) {
+          if (promDetail.Order_Min__c > orderAmount || orderAmount > promDetail.Order_Max__c) 
+               isOrderLimit=false;
+          
+        }        
+        
+        if (!(isLicenseLimit && isTermLimit && isOrderLimit))
+          continue;
+                      
+        
+        if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='% on Products'){
+          if (promDetail.Applicable_to_All_Products__c){
+            discountPercentage = (promDetail.Discount_Percent__c)/100;
+            discountedUpfrontPayment = discountedUpfrontPayment*(1-discountPercentage);  
+          }          
+          else if (promoProductMap.containsKey(product2Id)){
+            for(string promo1: promoProductMap.get(product2Id)){
+              if (promo==promo1){              
+                  discountPercentage = (promDetail.Discount_Percent__c)/100;
+                  discountedUpfrontPayment = discountedUpfrontPayment*(1-discountPercentage);   
+              }
+            }            
+          }
+          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='% on Order'){
+          discountPercentage = (promDetail.Discount_Percent__c)/100;
+          discountedUpfrontPayment = discountedUpfrontPayment*(1-discountPercentage);          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='Flat on Products'){
+          if (promDetail.Applicable_to_All_Products__c){
+            discountedUpfrontPayment = discountedUpfrontPayment - promDetail.Discount_Amount__c;
+            if (discountedUpfrontPayment <0)
+              discountedUpfrontPayment=0;
+          }
+          else if (promoProductMap.containsKey(product2Id)){
+            for(string promo1: promoProductMap.get(product2Id)){
+              if (promo==promo1){              
+                  discountedUpfrontPayment = discountedUpfrontPayment - promDetail.Discount_Amount__c;
+                  if (discountedUpfrontPayment <0)
+                       discountedUpfrontPayment=0;
+              }
+            }            
+          }
+          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='Flat Amount on Order'){
+          /* TBD - Due in next release as per Sarat*/          
+        }
+      }    
+      return discountedUpfrontPayment;        
+    }
+    catch(Exception ex){
+      system.debug(ex);
+      return discountedUpfrontPayment;
+    }
+  
+  }
+  
+  /*applying discount on upfront payment */
+  public decimal applyPromoOnUpfrontPayment(set<string> promoIDs,string product2Id, decimal upfrontPayment,integer licenseQty, integer termQty, decimal upfrontSubTotal, decimal recurringSubTotal){
+    decimal discountPercentage =0;
+    string discountType;
+    decimal discountedUpfrontPayment=upfrontPayment;
+    try{
+      for(string promo:promoIDs){
+        Promotions__c promDetail = promotionMap.get(promo);
+        boolean isLicenseLimit = true;
+        boolean isTermLimit = true;
+        boolean isOrderLimit= true;
+        boolean isUpfrontOrderLimit= true;  
+        
+        if (promDetail.Enforce_Licnese_Limits__c) {
+          if (promDetail.License_Min__c > licenseQty || licenseQty > promDetail.License_Max__c) 
+               isLicenseLimit = false;
+        }
+        if (promDetail.Enforce_Term_Limits__c) {
+          if (promDetail.Term_Min__c > termQty || termQty > promDetail.Term_Max__c) 
+               isTermLimit=false;
+        }
+        if (promDetail.Enforce_Order_Limit__c) {
+          if (promDetail.Order_Min__c > recurringSubTotal || recurringSubTotal > promDetail.Order_Max__c) 
+               isOrderLimit=false;
+                  
+        }
+        if (promDetail.Enforce_Order_Limit_Upfront__c){
+          if (promDetail.Order_Min_Upfront__c > upfrontSubTotal || upfrontSubTotal > promDetail.Order_Max_Upfront__c) 
+               isUpfrontOrderLimit=false;          
+        }        
+        
+        if (!(isLicenseLimit && isTermLimit && isOrderLimit && isUpfrontOrderLimit))
+          continue;
+                      
+        
+        if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='% on Products'){
+          if (promDetail.Applicable_to_All_Products__c){
+            discountPercentage = (promDetail.Discount_Percent__c)/100;
+            discountedUpfrontPayment = discountedUpfrontPayment*(1-discountPercentage);  
+          }          
+          else if (promoProductMap.containsKey(product2Id)){
+            for(string promo1: promoProductMap.get(product2Id)){
+              if (promo==promo1){              
+                  discountPercentage = (promDetail.Discount_Percent__c)/100;
+                  discountedUpfrontPayment = discountedUpfrontPayment*(1-discountPercentage);   
+              }
+            }            
+          }
+          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='% on Order'){
+          discountPercentage = (promDetail.Discount_Percent__c)/100;
+          discountedUpfrontPayment = discountedUpfrontPayment*(1-discountPercentage);          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='Flat on Products'){
+          if (promDetail.Applicable_to_All_Products__c){
+            discountedUpfrontPayment = discountedUpfrontPayment - promDetail.Discount_Amount__c;
+            if (discountedUpfrontPayment <0)
+              discountedUpfrontPayment=0;
+          }
+          else if (promoProductMap.containsKey(product2Id)){
+            for(string promo1: promoProductMap.get(product2Id)){
+              if (promo==promo1){              
+                  discountedUpfrontPayment = discountedUpfrontPayment - promDetail.Discount_Amount__c;
+                  if (discountedUpfrontPayment <0)
+                       discountedUpfrontPayment=0;
+              }
+            }            
+          }
+          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='Flat Amount on Order'){
+          /* TBD - Due in next release as per Sarat*/          
+        }
+      }    
+      return discountedUpfrontPayment;        
+    }
+    catch(Exception ex){
+      system.debug(ex);
+      return discountedUpfrontPayment;
+    }
+  
+  }
+  
+  
+  /* Depracated - applying discount on recurring payment */
+  public decimal applyPromoOnRecurringPayment(set<string> promoIDs,string product2Id, decimal recurringPayment, integer licenseQty, integer termQty, decimal OrderAmount){
+    decimal discountPercentage =0;
+    string discountType;
+    decimal discountedRecurringPayment=recurringPayment;
+    try{
+      for(string promo:promoIDs){
+        Promotions__c promDetail = promotionMap.get(promo);
+        
+        boolean isLicenseLimit = true;
+        boolean isTermLimit = true;
+        boolean isOrderLimit= true;      
+        
+        if (promDetail.Enforce_Licnese_Limits__c) {
+          if (promDetail.License_Min__c > licenseQty || licenseQty > promDetail.License_Max__c) 
+               isLicenseLimit = false;
+        }
+        if (promDetail.Enforce_Term_Limits__c) {
+          if (promDetail.Term_Min__c > termQty || termQty > promDetail.Term_Max__c) 
+               isTermLimit=false;
+        }
+        if (promDetail.Enforce_Order_Limit__c) {
+          if (promDetail.Order_Min__c > orderAmount || orderAmount > promDetail.Order_Max__c) 
+               isOrderLimit=false;
+        }
+        
+        if (!(isLicenseLimit && isTermLimit && isOrderLimit))
+          continue;
+              
+        
+        if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='% on Products'){
+          if (promDetail.Applicable_to_All_Products__c){
+            discountPercentage = (promDetail.Discount_Percent__c)/100;
+            discountedRecurringPayment = discountedRecurringPayment*(1-discountPercentage);             
+          }
+          else if (promoProductMap.containsKey(product2Id)){
+              for(string promo1: promoProductMap.get(product2Id)){
+                if (promo==promo1){  
+                    discountPercentage = (promDetail.Discount_Percent__c)/100;
+                    discountedRecurringPayment = discountedRecurringPayment*(1-discountPercentage);   
+              }
+            }
+          }
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='% on Order'){
+          discountPercentage = (promDetail.Discount_Percent__c)/100;
+          discountedRecurringPayment = discountedRecurringPayment*(1-discountPercentage);          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='Flat on Products'){
+          if (promDetail.Applicable_to_All_Products__c){
+            discountedRecurringPayment = discountedRecurringPayment - promDetail.Discount_Amount__c;
+            if (discountedRecurringPayment <0)
+                 discountedRecurringPayment=0;            
+          }          
+          else if (promoProductMap.containsKey(product2Id)){
+            for(string promo1: promoProductMap.get(product2Id)){
+              if (promo==promo1){              
+                  discountedRecurringPayment = discountedRecurringPayment - promDetail.Discount_Amount__c;
+                  if (discountedRecurringPayment <0)
+                       discountedRecurringPayment=0;
+              }
+            }            
+          }          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='Flat Amount on Order'){
+          /* TBD - Due in next release as per Sarat*/            
+        }
+
+
+      }    
+      return discountedRecurringPayment;        
+    }
+    catch(Exception ex){
+      system.debug(ex);
+      return discountedRecurringPayment;
+    }  
+  }
+  
+  
+  /* applying discount on recurring payment */
+  public decimal applyPromoOnRecurringPayment(set<string> promoIDs,string product2Id, decimal recurringPayment, integer licenseQty, integer termQty, decimal upfrontSubTotal, decimal recurringSubTotal){
+    decimal discountPercentage =0;
+    string discountType;
+    decimal discountedRecurringPayment=recurringPayment;
+    try{
+      for(string promo:promoIDs){
+        Promotions__c promDetail = promotionMap.get(promo);
+        
+        boolean isLicenseLimit = true;
+        boolean isTermLimit = true;
+        boolean isOrderLimit= true;
+        boolean isUpfrontOrderLimit= true;      
+        
+        if (promDetail.Enforce_Licnese_Limits__c) {
+          if (promDetail.License_Min__c > licenseQty || licenseQty > promDetail.License_Max__c) 
+               isLicenseLimit = false;
+        }
+        if (promDetail.Enforce_Term_Limits__c) {
+          if (promDetail.Term_Min__c > termQty || termQty > promDetail.Term_Max__c) 
+               isTermLimit=false;
+        }
+        if (promDetail.Enforce_Order_Limit__c) {
+          if (promDetail.Order_Min__c > recurringSubTotal || recurringSubTotal > promDetail.Order_Max__c) 
+               isOrderLimit=false;
+        }
+        if (promDetail.Enforce_Order_Limit_Upfront__c){
+          if (promDetail.Order_Min_Upfront__c > upfrontSubTotal || upfrontSubTotal > promDetail.Order_Max_Upfront__c) 
+               isUpfrontOrderLimit=false;          
+        }          
+        
+        if (!(isLicenseLimit && isTermLimit && isOrderLimit && isUpfrontOrderLimit))
+          continue;
+              
+        
+        if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='% on Products'){
+          if (promDetail.Applicable_to_All_Products__c){
+            discountPercentage = (promDetail.Discount_Percent__c)/100;
+            discountedRecurringPayment = discountedRecurringPayment*(1-discountPercentage);             
+          }
+          else if (promoProductMap.containsKey(product2Id)){
+              for(string promo1: promoProductMap.get(product2Id)){
+                if (promo==promo1){  
+                    discountPercentage = (promDetail.Discount_Percent__c)/100;
+                    discountedRecurringPayment = discountedRecurringPayment*(1-discountPercentage);   
+              }
+            }
+          }
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='% on Order'){
+          discountPercentage = (promDetail.Discount_Percent__c)/100;
+          discountedRecurringPayment = discountedRecurringPayment*(1-discountPercentage);          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='Flat on Products'){
+          if (promDetail.Applicable_to_All_Products__c){
+            discountedRecurringPayment = discountedRecurringPayment - promDetail.Discount_Amount__c;
+            if (discountedRecurringPayment <0)
+                 discountedRecurringPayment=0;            
+          }          
+          else if (promoProductMap.containsKey(product2Id)){
+            for(string promo1: promoProductMap.get(product2Id)){
+              if (promo==promo1){              
+                  discountedRecurringPayment = discountedRecurringPayment - promDetail.Discount_Amount__c;
+                  if (discountedRecurringPayment <0)
+                       discountedRecurringPayment=0;
+              }
+            }            
+          }          
+        }
+        else if (promDetail.Promo_Type__c=='Discount' && promDetail.Discount_Type__c=='Flat Amount on Order'){
+          /* TBD - Due in next release as per Sarat*/            
+        }
+
+
+      }    
+      return discountedRecurringPayment;        
+    }
+    catch(Exception ex){
+      system.debug(ex);
+      return discountedRecurringPayment;
+    }  
+  }
+  
+  
+  /* Load the available Promotions */
+  private void buildPromotionMap(){
+      promotionMap = new map<ID, Promotions__c>([Select p.Term_Unit__c, p.Term_Min__c, p.Term_Max__c, 
+                            p.Reason__c, p.Promo_Type__c, p.Promo_Status__c, p.Promo_Startdate__c, p.Promo_Enddate__c, 
+                            p.Promo_Code__c, p.Promo_Category__c, p.OwnerId, p.Name, p.License_Unit__c, p.License_Min__c, 
+                            p.License_Max__c,  p.Id, p.IS_Global__c, p.Freeup_Front__c, /*p.Freeterm_Unit__c,*/ p.Free_Term_Quantity__c, 
+                            p.Enforce_Term_Limits__c, p.Enforce_Licnese_Limits__c, p.Enforce_Order_Limit__c, p.Order_Min__c, p.Order_Max__c, p.Discount_Type__c, p.Discount_Percent__c,
+                            p.Enforce_Order_Limit_Upfront__c,p.Order_Min_Upfront__c,p.Order_Max_Upfront__c,                             
+                            p.Discount_Amount__c, p.Description__c, /*p.CurrencyIsoCode,*/ p.Contract_Renewal__c, p.Can_be_Combined__c, 
+                            p.Applicable_to_All_Products__c From Promotions__c p
+                            where p.Promo_Status__c='Active'
+                            order by p.Name]);
+         
+      if (promotionMap.values().size()<1)
+        throw new CommonException('No Promotions available',CommonExceptionType.NoPromotionAvailable);
+        
+    }
+  
+  /* Load the available Promotions */
+  public list<Promotions__c> getPromotionList(){
+      return [Select p.Term_Unit__c, p.Term_Min__c, p.Term_Max__c, 
+                            p.Reason__c, p.Promo_Type__c, p.Promo_Status__c, p.Promo_Startdate__c, p.Promo_Enddate__c, 
+                            p.Promo_Code__c, p.Promo_Category__c, p.OwnerId, p.Name, p.License_Unit__c, p.License_Min__c, 
+                            p.License_Max__c,  p.Id, p.IS_Global__c, p.Freeup_Front__c, /*p.Freeterm_Unit__c,*/ p.Free_Term_Quantity__c, 
+                            p.Enforce_Term_Limits__c, p.Enforce_Licnese_Limits__c, p.Enforce_Order_Limit__c, p.Order_Min__c, p.Order_Max__c, p.Discount_Type__c, p.Discount_Percent__c, 
+                            p.Discount_Amount__c, p.Description__c, /*p.CurrencyIsoCode,*/ p.Contract_Renewal__c, p.Can_be_Combined__c, 
+                            p.Applicable_to_All_Products__c From Promotions__c p
+                            where p.Promo_Status__c='Active'
+                            order by p.Name ASC];
+    }
+  
+  
+  /* building the available promos for products map */
+  private void buildPromoProductMap(){
+    promoProductMap = new map<string, set<string>> ();
+    for(Promo_Products__c pp:[Select p.Promocode__c, p.Product_Code__c From Promo_Products__c p]){    
+      if (!promoProductMap.containsKey(pp.Product_Code__c)){
+          promoProductMap.put(pp.Product_Code__c, new set<string>());
+        }
+          set<string> ppSet = promoProductMap.get(pp.Product_Code__c);
+        ppSet.add(pp.Promocode__c);
+        promoProductMap.put(pp.Product_Code__c,ppSet);
+    }
+  }  
+
+  public list<m_Product_Price_Schedule__History> getPriceScheduleHistory(){
+    m_Product_Price_Schedule__c ppsc = 
+        (m_Product_Price_Schedule__c) m_sc.getRecord();
+    return [Select m.ParentId, m.OldValue, m.NewValue, m.IsDeleted, m.Id, m.Field, m.CreatedDate, m.CreatedById 
+        From m_Product_Price_Schedule__History m 
+        where m.ParentId=:ppsc.Id 
+        Order by m.CreatedDate desc LIMIT 20];
+  }
+
+} //end of class

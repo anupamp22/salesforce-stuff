@@ -1,0 +1,393 @@
+/*****************************
+Author: Anupam Priyadarshi
+Title: Retrieveing the N-level of product hierarchy for products/packages
+Description:
+Open Issues (remove when resolved): N/A
+Usage:
+See test Method.
+API Version: 26.0
+Revision History:
+03.08.2013 Created
+03.15.2013 Integrated with CommonObj
+03.20.2013 changes made to prevent the circular hierarchy
+03.27.2013 creating the test coverage for this class
+04.11.2013 Optimized the class, removed some of the code
+04.12.2013 Changed for Pre-req only
+04.26.2013 Changed to restrict 5 level of hierarchy for prod rel triggers
+***************************************************/
+public with sharing class ProdRelTraverseUtil extends CommonObj {   
+    private static map<Id, map<Id,m_Product_Relationship__c>> topDownProdRelMap;
+    private static map<Id, map<Id,m_Product_Relationship__c>> bottomUpProdRelMap;
+    private static map<Id, map<Id,m_Product_Relationship__c>> topDownProdRelMap1;
+    private static set<Id> globalProdRel;
+    private boolean bottomUp = false;
+    private boolean topDown = false;
+    //private static final integer noOflevels = 5;
+    private static integer treeDepth=0;
+    public ProdRelTraverseUtil(){
+        buildProductRelationMap();
+    }
+    public ProdRelTraverseUtil(boolean bottomUp, boolean topDown){
+    this.bottomUp = bottomUp;
+    this.topDown = topDown;
+    if (bottomUp){
+      buildBottomUpProdRelMap();  
+    }
+    if (topDown){
+      buildTopDownProdRelMap();
+    }
+  }   
+  public void init(Id product2Id){
+    globalProdRel = new set<Id>{product2Id};
+  }
+    public class ProdRelObject{
+        public string relType;
+        public boolean parentIsPackage; 
+        public boolean childIsPackage; 
+        public string parentProdId;
+        public string childProdId; 
+        public integer level;
+        public ProductMatrixObject pmo;
+        public ProdRelObject(){         
+        }
+    }       
+    @isTest(SeeAllData=true)
+    static void test(){
+        ProdRelTraverseUtil prto = new ProdRelTraverseUtil();
+         ProdRelTraverseUtil prto1 = new ProdRelTraverseUtil(true, true);
+        //prto.buildProductRelationMap();
+        Id product2Id = [select Id from Product2 where ProductCode='ULTBPRG' /*and Is_Package__c=true*/ and IsActive=true].Id;
+        //set<Id> allProdRels = getAllProdRels(new set<Id>{product2Id});
+        map<Id, prodRelObject> allProdRels= prto.getAllProdRelMap(new set<Id>{product2Id});
+        //allProdRels = trimRelationships(allProdRels);     
+        //system.debug('Anupam is printing:::'+allProdRels.keySet());
+        prto1.getAllFlattenedTreeFromBottomUp(new set<Id>{product2Id},5,1);
+        prto1.getAllFlattenedTreeFromTopDown(new set<Id>{product2Id},5,1);
+        
+        
+        try{
+            prto.getAllProdRelMap(new set<Id>{product2Id}, new map<string, CommonObj.ProductMatrixObject>());           
+        }
+        catch(CommonException ex){          
+        }
+        try{
+            prto.getAllProdRelMap(new set<Id>{product2Id}, new map<string, CommonObj.ProductMatrixObject>(), 5, 1);
+        }
+        catch(Exception ex){
+        }
+        /*for(prodRelObject prd: allProdRels.values()){
+            system.debug(prd.relType+'::'+prd.childProdName+':::'+prd.parentProdName+':::'+prd.level);          
+        }*/
+        map<Id, Product2> products = new map<Id, Product2>([select Id, name from Product2 where Id IN :allProdRels.keySet()]);
+        //map<Id, Product2> products = new map<Id, Product2>([select Id, name from Product2 where Id IN :allProdRels]);
+        for(Product2 prd: products.values()){
+            system.debug(prd.name);
+        }
+        
+                
+    }   
+    //Consumed by CommonObj - modified as per the Integration needs
+    public void buildProductRelationMap(){
+        topDownProdRelMap = new map<Id, map<Id,m_Product_Relationship__c>>();
+        for(m_Product_Relationship__c ps: [Select m.Product_Code__r.Id, m.Product_Code__r.Is_Package__c, m.Product_Code__r.Name, m.Related_Product_Code__r.Is_Package__c, m.Relation_Type__c, m.Related_Product_Code__r.Id, m.Related_Product_Code__r.ProductCode,
+                                            m.Related_Product_Code__r.Name, m.Default__c, m.Id,
+                                            m.License_Max_Qty__c, m.License_Min_Qty__c,m.License_Recommended__c,
+                                            m.License_Unit__c From m_Product_Relationship__c m
+                                            /*where m.Product_Code__c IN :Product2Id*/ 
+                                            where m.Product_Code__r.IsActive=true 
+                                            and m.Related_Product_Code__r.IsActive=true
+                                            and m.Related_Product_Code__r.m_Package_Type__c not in ('Pick 1', 'Pick N of M')
+                                            and m.Relation_Type__c IN ('Pre-Req')
+                                            /*and m.Relation_Type__c not in ('Pre-Req Any 1', 'Options')*/]){
+                if(!topDownProdRelMap.containsKey(ps.Product_Code__r.Id)){
+                    topDownProdRelMap.put(ps.Product_Code__r.Id, new map<Id,m_Product_Relationship__c>());
+                }
+                map<Id,m_Product_Relationship__c> pr = topDownProdRelMap.get(ps.Product_Code__r.Id);
+                pr.put(ps.Related_Product_Code__r.Id,ps);
+                topDownProdRelMap.put(ps.Product_Code__r.Id,pr);        
+        }       
+        
+        /*bottomUpProdRelMap = new map<Id, map<Id,m_Product_Relationship__c>>();
+        for(m_Product_Relationship__c ps: [Select m.Product_Code__r.Id, m.Product_Code__r.Is_Package__c, m.Product_Code__r.Name, m.Related_Product_Code__r.Is_Package__c, m.Relation_Type__c, m.Related_Product_Code__r.Id, m.Related_Product_Code__r.ProductCode,
+                                            m.Related_Product_Code__r.Name, m.Default__c, m.Id From m_Product_Relationship__c m
+                                            //where m.Product_Code__c IN :Product2Id
+                                            where m.Product_Code__r.IsActive=true 
+                                            and m.Related_Product_Code__r.IsActive=true]){
+                if(!bottomUpProdRelMap.containsKey(ps.Related_Product_Code__r.Id)){
+                    bottomUpProdRelMap.put(ps.Related_Product_Code__r.Id, new map<Id,m_Product_Relationship__c>());
+                }
+                map<Id,m_Product_Relationship__c> pr = bottomUpProdRelMap.get(ps.Related_Product_Code__r.Id);
+                pr.put(ps.Product_Code__r.Id,ps);
+                bottomUpProdRelMap.put(ps.Product_Code__r.Id,pr);       
+        }*/
+        
+    }
+    
+  //Consumed by Order2CashValidationOnProdRel trigger to stop the cicular hierarchy
+  public void buildBottomUpProdRelMap(){
+    bottomUpProdRelMap = new map<Id, map<Id,m_Product_Relationship__c>>();
+    //transient set<Id> treeOfAllIds = new set<Id>();
+    
+    for(m_Product_Relationship__c ps: [Select m.Product_Code__r.Id, m.Product_Code__r.Is_Package__c, m.Product_Code__r.Name, m.Related_Product_Code__r.Is_Package__c, m.Relation_Type__c, m.Related_Product_Code__r.Id, m.Related_Product_Code__r.ProductCode,
+                      m.Related_Product_Code__r.Name, m.Default__c, m.Id From m_Product_Relationship__c m
+                        where m.Product_Code__r.IsActive=true 
+                        and m.Related_Product_Code__r.IsActive=true
+                        and m.Relation_Type__c IN ('Pre-Req','Contains','Pre-Req Any 1')]){
+        if(!bottomUpProdRelMap.containsKey(ps.Related_Product_Code__r.Id)){
+          bottomUpProdRelMap.put(ps.Related_Product_Code__r.Id, new map<Id,m_Product_Relationship__c>());
+        }
+        map<Id,m_Product_Relationship__c> pr = bottomUpProdRelMap.get(ps.Related_Product_Code__r.Id);
+        pr.put(ps.Product_Code__r.Id,ps);
+        bottomUpProdRelMap.put(ps.Related_Product_Code__r.Id,pr);
+    }
+
+    //treeOfAllIds = getAllFlattenedTreeFromBottomUp(productIds,bottomUpProdRelMap);
+    //return treeOfAllIds;  
+  }
+  
+  //Consumed by Order2CashValidationOnProdRel trigger to stop the cicular hierarchy
+  public void buildTopDownProdRelMap(){
+    topDownProdRelMap1 = new map<Id, map<Id,m_Product_Relationship__c>>();
+    //transient set<Id> treeOfAllIds = new set<Id>();
+    
+    for(m_Product_Relationship__c ps: [Select m.Product_Code__r.Id, m.Product_Code__r.Is_Package__c, m.Product_Code__r.Name, m.Related_Product_Code__r.Is_Package__c, m.Relation_Type__c, m.Related_Product_Code__r.Id, m.Related_Product_Code__r.ProductCode,
+                      m.Related_Product_Code__r.Name, m.Default__c, m.Id From m_Product_Relationship__c m
+                        where m.Product_Code__r.IsActive=true 
+                        and m.Related_Product_Code__r.IsActive=true
+                        and m.Relation_Type__c IN ('Pre-Req','Contains','Pre-Req Any 1')]){
+        if(!topDownProdRelMap1.containsKey(ps.Product_Code__r.Id)){
+          topDownProdRelMap1.put(ps.Product_Code__r.Id, new map<Id,m_Product_Relationship__c>());
+        }
+        map<Id,m_Product_Relationship__c> pr = topDownProdRelMap1.get(ps.Product_Code__r.Id);
+        pr.put(ps.Related_Product_Code__r.Id,ps);
+        topDownProdRelMap1.put(ps.Product_Code__r.Id,pr);
+    }
+
+    //treeOfAllIds = getAllFlattenedTreeFromTopDown(productIds,topDownProdRelMap1);
+    //return treeOfAllIds;  
+  }
+    
+    //Consumed by CommonObj - modified as per the Integration needs - DONOT Change
+    public map<Id, prodRelObject> getAllProdRelMap(set<Id> setProduct2Id, map<string, ProductMatrixObject> prodMap){
+        transient set<Id> prodRels = new set<Id>();
+        transient map<Id, prodRelObject> prodRelMap = new  map<Id, prodRelObject>();
+        for (Id prodId:setProduct2Id){
+            if (!topDownProdRelMap.containsKey(prodId))
+                continue;
+                treeDepth++;
+                for(m_Product_Relationship__c ps:topDownProdRelMap.get(prodId).values()){
+                    //if (ps.Relation_Type__c =='Pre-Req'){
+                        transient prodRelObject prelObj = new prodRelObject();
+                        
+                        prelObj.relType = ps.Relation_Type__c;
+                        prelObj.parentIsPackage = ps.Product_Code__r.Is_Package__c;
+                        prelObj.childIsPackage = ps.Related_Product_Code__r.Is_Package__c;
+                        prelObj.parentProdId = ps.Product_Code__r.Id;
+                        prelObj.childProdId = ps.Related_Product_Code__r.Id;        
+                        prelObj.level = treeDepth;
+                        
+                        prelObj.pmo = new ProductMatrixObject();
+                        prelObj.pmo.sfdcId = ps.Related_Product_Code__r.Id;
+                        BusinessRuleObj bo = new BusinessRuleObj(prodMap);
+                        prelObj.pmo.quantityList = bo.getQuantityListByProdRelORUOM(integer.valueOf(ps.License_Max_Qty__c),
+                                                                                    integer.valueOf(ps.License_Min_Qty__c),
+                                                                                    integer.valueOf(ps.License_Recommended__c),
+                                                                                    ps.License_Unit__c,prelObj.pmo.sfdcId);
+                                                                                    
+                                                                        
+                        /*prelObj.pmo.quantityList = new QuantityType(integer.valueOf(ps.License_Recommended__c),
+                                                                    integer.valueOf(ps.License_Max_Qty__c),
+                                                                    integer.valueOf(ps.License_Min_Qty__c), ps.License_Unit__c);*/
+                        
+                        prodRelMap.put(ps.Related_Product_Code__r.Id,prelObj);
+                    //}                 
+                    if(prodRelMap.keySet().size()>0){                   
+                        prodRelMap.putAll(getAllProdRelMap(prodRelMap.keySet(), prodMap));
+                    }               
+                }           
+        }
+        prodRelMap = trimRelationships(prodRelMap);
+       return prodRelMap;
+    }
+    
+        //Consumed by CommonObj - modified as per the Integration needs - DONOT Change
+    public map<Id, prodRelObject> getAllProdRelMap(set<Id> setProduct2Id, map<string, ProductMatrixObject> prodMap, integer noOfLevels, integer currentLevel){
+        if (currentLevel>=noOflevels) return new map<Id, prodRelObject>();
+        currentLevel++;
+        transient set<Id> prodRels = new set<Id>();
+        transient map<Id, prodRelObject> prodRelMap = new  map<Id, prodRelObject>();
+        for (Id prodId:setProduct2Id){
+            if (!topDownProdRelMap.containsKey(prodId))
+                continue;
+                treeDepth++;
+                for(m_Product_Relationship__c ps:topDownProdRelMap.get(prodId).values()){
+                    //if (ps.Relation_Type__c =='Pre-Req'){
+                        transient prodRelObject prelObj = new prodRelObject();
+                        
+                        prelObj.relType = ps.Relation_Type__c;
+                        prelObj.parentIsPackage = ps.Product_Code__r.Is_Package__c;
+                        prelObj.childIsPackage = ps.Related_Product_Code__r.Is_Package__c;
+                        prelObj.parentProdId = ps.Product_Code__r.Id;
+                        prelObj.childProdId = ps.Related_Product_Code__r.Id;        
+                        prelObj.level = treeDepth;
+                        
+                        prelObj.pmo = new ProductMatrixObject();
+                        prelObj.pmo.sfdcId = ps.Related_Product_Code__r.Id;
+                        BusinessRuleObj bo = new BusinessRuleObj(prodMap);
+                        //system.debug('Printing inside getAllProdRelMap() for quanitity checks::'+integer.valueOf(ps.License_Max_Qty__c)+integer.valueOf(ps.License_Min_Qty__c)+integer.valueOf(ps.License_Recommended__c)+ps.License_Unit__c+prelObj.pmo.sfdcId);
+                        prelObj.pmo.quantityList = bo.getQuantityListByProdRelORUOM(integer.valueOf(ps.License_Max_Qty__c),
+                                                                                    integer.valueOf(ps.License_Min_Qty__c),
+                                                                                    integer.valueOf(ps.License_Recommended__c),
+                                                                                    ps.License_Unit__c,prelObj.pmo.sfdcId);
+                                                                                    
+                                                                        
+                        /*prelObj.pmo.quantityList = new QuantityType(integer.valueOf(ps.License_Recommended__c),
+                                                                    integer.valueOf(ps.License_Max_Qty__c),
+                                                                    integer.valueOf(ps.License_Min_Qty__c), ps.License_Unit__c);*/
+                        if (!prodRelMap.containsKey(ps.Related_Product_Code__r.Id))
+                              prodRelMap.put(ps.Related_Product_Code__r.Id,prelObj);
+                    //}                 
+                    if(prodRelMap.keySet().size()>0){                   
+                        prodRelMap.putAll(getAllProdRelMap(prodRelMap.keySet(), prodMap, noOfLevels, currentLevel));
+                    }               
+                }           
+        }
+        prodRelMap = trimRelationships(prodRelMap);
+       return prodRelMap;
+    }
+    
+    
+    
+    //Depracated method-Maybe removed latter, if not required
+    public  map<Id, prodRelObject> getAllProdRelMap(set<Id> setProduct2Id){
+        transient set<Id> prodRels = new set<Id>();
+        transient map<Id, prodRelObject> prodRelMap = new  map<Id, prodRelObject>();
+        for (Id prodId:setProduct2Id){
+            if (!topDownProdRelMap.containsKey(prodId))
+                continue;
+                treeDepth++;
+                for(m_Product_Relationship__c ps:topDownProdRelMap.get(prodId).values()){
+                    //if (ps.Relation_Type__c =='Pre-Req'){
+                        prodRelObject prelObj = new prodRelObject();
+                        
+                        prelObj.relType = ps.Relation_Type__c;
+                        prelObj.parentIsPackage = ps.Product_Code__r.Is_Package__c;
+                        prelObj.childIsPackage = ps.Related_Product_Code__r.Is_Package__c;
+                        prelObj.parentProdId = ps.Product_Code__r.Id;
+                        prelObj.childProdId = ps.Related_Product_Code__r.Id;        
+                        prelObj.level = treeDepth;
+                        
+                        prelObj.pmo = new ProductMatrixObject();
+                        prelObj.pmo.sfdcId = ps.Related_Product_Code__r.Id;
+                        prelObj.pmo.quantityList = new QuantityType(integer.valueOf(ps.License_Recommended__c),
+                                                                    integer.valueOf(ps.License_Max_Qty__c),
+                                                                    integer.valueOf(ps.License_Min_Qty__c), ps.License_Unit__c);
+                        
+                        prodRelMap.put(ps.Related_Product_Code__r.Id,prelObj);
+                    //}                 
+                    if(prodRelMap.keySet().size()>0){                   
+                        prodRelMap.putAll(getAllProdRelMap(prodRelMap.keySet()));
+                    }               
+                }           
+        }
+        prodRelMap = trimRelationships(prodRelMap);
+       return prodRelMap;
+    }
+    
+    //Trims the packages from the hierarchy as we don't need them as they are already flatenned out.
+    public static map<Id, prodRelObject> trimRelationships(map<Id, prodRelObject> pMap){
+        for(prodRelObject pm: pMap.values()){
+            if (pm.parentIsPackage){
+                pMap.remove(pm.parentProdId);
+            }           
+        }
+        return pMap;        
+    }
+    
+    //Original method, required for testing purposes only
+    public static set<Id> getAllProdRels(set<Id> setProduct2Id){
+        set<Id> prodRels = new set<Id>();
+        for (Id prodId:setProduct2Id){
+            if (!topDownProdRelMap.containsKey(prodId))
+                continue;
+                for(m_Product_Relationship__c ps:topDownProdRelMap.get(prodId).values()){
+                    if (ps.Related_Product_Code__r.Is_Package__c)
+                    //if (ps.Relation_Type__c!='Contains'){
+                        prodRels.add(ps.Related_Product_Code__r.Id);
+                    //}                 
+                    if(prodRels.size()>0){
+                        prodRels.addAll(getAllProdRels(prodRels));
+                    }               
+                }           
+        }
+       return prodRels;
+    }
+    
+    //Recurse the map and finds the whole tree hierarchy (Bottom Up)-
+    //Consumed by Order2CashValidationOnProdRel trigger purposes to stop the cicular hierarchy
+    public set<Id> getAllFlattenedTreeFromBottomUp(set<Id> setProduct2Id, integer noOfLevels, integer CurrentLevel){
+        if (CurrentLevel>noOfLevels) return new set<Id>();
+        CurrentLevel++;
+        set<Id> prodRels = new set<Id>();
+        for (Id prodId:setProduct2Id){
+            if (!bottomUpProdRelMap.containsKey(prodId))
+                continue;
+                for(m_Product_Relationship__c ps:bottomUpProdRelMap.get(prodId).values()){
+                  if (!globalProdRel.contains(ps.Product_Code__r.Id)){
+                       if (!prodRels.contains(ps.Product_Code__r.Id)){
+                           prodRels.add(ps.Product_Code__r.Id);
+                           globalProdRel.add(ps.Product_Code__r.Id);
+                       }               
+                  }
+                    if(prodRels.size()>0){
+                        prodRels.addAll(getAllFlattenedTreeFromBottomUp(prodRels,noOfLevels,CurrentLevel));
+                    }               
+                }           
+        }
+       return prodRels;     
+    }   
+    
+    //Recurse the map and finds the whole tree hierarchy (top down)-
+    //Consumed by Order2CashValidationOnProdRel trigger purposes to stop the cicular hierarchy
+    public set<Id> getAllFlattenedTreeFromTopDown(set<Id> setProduct2Id,integer noOfLevels, integer CurrentLevel){
+     if (CurrentLevel>noOfLevels) return new set<Id>();
+        CurrentLevel++;        
+        set<Id> prodRels = new set<Id>();
+        for (Id prodId:setProduct2Id){
+            if (!topDownProdRelMap1.containsKey(prodId))
+                continue;
+                for(m_Product_Relationship__c ps:topDownProdRelMap1.get(prodId).values()){
+                  if (!prodRels.contains(ps.Related_Product_Code__r.Id))
+                            prodRels.add(ps.Related_Product_Code__r.Id);
+                            
+                    if(prodRels.size()>0){
+                        prodRels.addAll(getAllFlattenedTreeFromTopDown(prodRels,noOfLevels,CurrentLevel));
+                    }               
+                }           
+        }
+       return prodRels;     
+    }   
+    //Returns a dynamic SOQL statement for the Object, includes only creatable fields since we will be including cloned result of the query
+    public static string getCreatableFieldSQLs(String objectName, String WhereClause){
+        String selects='';
+        if (WhereClause==null || WhereClause==''){return null;}
+        map<string,Schema.Sobjectfield> fmap = Schema.getGlobalDescribe().get(objectName.toLowerCase()).getDescribe().Fields.getMap();
+        list<string> selectFields = new list<string>();
+        if (fmap!=null){
+            for (Schema.Sobjectfield ft: fmap.values()){
+                Schema.DescribeFieldResult fd = ft.getDescribe();
+                if (fd.isCreateable()){
+                    selectFields.add(fd.getName());
+                }
+            }
+        }
+        if (selectFields!=null && selectFields.size()>0){
+            for(string s:selectFields){
+                selects+= s + ',';
+            }
+            if (selects.endsWith(',')){selects = selects.substring(0, selects.lastIndexOf(','));}
+            
+        }
+        return 'SELECT ' + selects + ' FROM ' +objectName + ' WHERE '+WhereClause;
+    }
+    }//end of class

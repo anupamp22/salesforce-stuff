@@ -1,0 +1,560 @@
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+275
+276
+277
+278
+279
+280
+/*
+ * Author: Venkata Kunisetty
+ * Developer: Venkata Kunisetty
+ * Title: ReleasedProductsPickerExtention
+ * Description: Controller for the Released Products Picker Visualforce Page
+ * Ref: Order to Cash Project - Opportunity Management
+ * Open Issues (remove when resolved): N/A   
+ * Usage: Called when Released products button is clicked on the Opportunity
+ * API Version: SFDC v25.0
+ * Licensing: Mitchell International.
+ * Revisions' History: 
+ * 11.30.2012- Updated comments
+ * 01.09.2013- Product dropdown box replaced with the Product Name from the Pricebook Entry
+ */
+
+
+@isTest(SeeAllData=true)
+public class ReleasedProductsPickerExtention {
+
+    private Account acct, parentAccount;
+    private String opportunityId, accountId;
+    public String contractId {get; set;}
+    public Boolean isPrevious {get;set;}
+
+    public List<ContractWrapper> contracts {get; set;}
+    private Map<Id,Pricebookentry> pricebookEntries = new Map<Id,Pricebookentry>();
+    static private Map<String,List<Pricebookentry>> pbEntriesByFamily = new Map<String,List<Pricebookentry>>();
+
+    public PageReference init()  {
+        accountId = ApexPages.currentPage().getParameters().get('accountId');
+        opportunityId = ApexPages.currentPage().getParameters().get('opportunityId');
+        contractId = ApexPages.currentPage().getParameters().get('contractId');
+
+        if (accountId != null) {
+          acct = [select name, accountnumber, parent.id, parent.name, parent.accountnumber from account where id = :accountId];
+        } 
+        
+        return loadContracts();
+    }  
+
+    public PageReference cancel() {
+        return new PageReference(ApexPages.currentPage().getParameters().get('cancelURL'));
+    }
+
+    private PageReference loadContracts() {
+        
+    Map<Id,String> priceLevelSql = new Map<Id,String>();
+        Map<String,String> productFamilies = new Map<String,String>();
+        contracts = new List<ContractWrapper>();
+        
+        String whereSql = contractId=='' ? '(accountId = \''+acct.id+'\'' + (acct.parent.id != null ? ' or accountId=\''+acct.parent.id+'\')' : ')') :
+                            'id=\''+contractId+'\'';
+        
+        String sqlQry = 'select Id, Name, pricebook2id, renewal_term__c, original_term__c, ContractNumber, Account.Id, Account.Name, Account.AccountNumber, account.parent.id, '+
+                                                        'account.parent.name, Account.SHIPTO__c,StartDate, EndDate, Renew_Price_Options__c, Contract_Type__c, (select id, AssetId, UnitPrice, ServiceContract.NS_Internal_ID__c, NS_Internal_ID__c, SalesOrderNumber__c, ContractLineItem__c, '+
+                                                        'quantity, startdate,enddate, pricebookentry.product2.Id, pricebookentry.product2.name, pricebookentry.unitprice, account_name__r.name, account_name__r.accountnumber, '+
+                                                        'servicecontract.pricebook2id, status, price_level__c, totalprice, Item_Group_Price_Level__c, Discount from ContractLineItems) from ServiceContract where status != \'Expired\' ';
+                                                        
+        sqlQry += ' and accountId = \''+acct.id+'\''; 
+        
+        System.debug('---------------SQL---->' + sqlQry);
+        
+        // return null;
+        
+       for (ServiceContract sc : database.query(sqlQry)) {
+                 
+          ContractWrapper cw = new ContractWrapper(sc,acct);
+          contracts.add(cw);
+          
+          for (contractlineitem li : sc.contractlineitems) {
+       
+            if (acct.parentId == null || (acct.parentId != null && acct.id==li.Account_Name__c)) {
+              
+              ContractLineItemWrapper liw = new ContractLineItemWrapper(li);
+              cw.lines.add(liw);
+              
+          if (liw.priceLevel != null) {
+            priceLevelSql.put(li.pricebookentry.product2.Id, liw.priceLevel.replace('Custom','Base Price')+'-'+String.valueOf(li.quantity).replace('.00',''));  
+          }
+          
+          productFamilies.put(li.pricebookentry.product2.Id, li.pricebookentry.product2.name);
+            }
+          }                                                  
+        }
+     
+       String inSql = '';
+    Map<Id,Product2> pmIdToPm = new Map<Id,Product2>();    
+    for (Product2 pm : [select name, productCode, item_category__c, product_group__c, family__c, product_type__c, description from Product2 where id in :productFamilies.keySet()]) {
+      pmIdToPm.put(pm.id, pm);
+        inSql += '\''+pm.name+'-Base Price-0'+'\',' + (priceLevelSql.get(pm.id)!=null ? ('\''+pm.name+'-'+priceLevelSql.get(pm.id)+ '\',') : '');
+    }
+    
+    Map<String,PricebookEntry> pbEntries = new Map<String,PricebookEntry>();
+    
+    if (inSql != '') {
+      inSql = '(' + inSql.substring(0,inSql.length()-1)+ ')';
+        if (inSql.length() > 2) {
+          for(PricebookEntry pbe : database.query('Select p.pricebook2Id, unitprice, p.Product2.Name, p.Product2.Price_Level__c, p.Product2.ProductCode, p.Product2Id From PricebookEntry p ' + 
+                              'where isactive=true and p.Product2.productcode in ' + inSql)){
+              pbEntries.put(pbe.Product2.ProductCode+String.valueOf(pbe.pricebook2Id), pbe);
+            }
+        }
+    }
+              
+        for (pricebookentry p : [select id, product2.productcode, unitprice, product2.name, pricebook2id from pricebookentry where product2.name in :productFamilies.values() and isactive=true order by product2.productcode]) {      
+          List<Pricebookentry> pbes = pbEntriesByFamily.get(p.product2.name+p.pricebook2id) != null ? pbEntriesByFamily.get(p.product2.name+p.pricebook2id) : new List<Pricebookentry>();
+          pbes.add(p);
+          pbEntriesByFamily.put(p.product2.name+p.pricebook2id, pbes);
+          pricebookEntries.put(p.id, p);
+        }        
+
+    for (ContractWrapper cw : contracts) { 
+      
+      if (contractId != '') {
+            acct = cw.c.account;
+            cw.selected = false; // changed to false from true by sarat
+          }
+          
+      for (ContractLineItemWrapper cli : cw.lines) {
+              PricebookEntry pbe = pbEntries.get(pmIdToPm.get(cli.cli.PriceBookEntry.Product2.Id).name+'-'+priceLevelSql.get(cli.cli.PriceBookEntry.Product2.Id)+cw.c.pricebook2id);        
+              if (pbe != null) {
+                cli.selectedProduct = pbe.id;
+              }
+
+              cli.productName = cli.cli.PriceBookEntry.Product2.Name;               
+            }
+         }
+        
+        return null;
+    }
+    
+  public PageReference loadReleasedProducts() {
+        Products_to_be_Released__c[] rpDel = new Products_to_be_Released__c[]{};
+        rpDel = [SELECT Id From Products_to_be_Released__c Where Opportunity__c = :opportunityId];
+
+        Products_to_be_Released__c[] rpAdd = new Products_to_be_Released__c[]{};    
+        for (ContractWrapper cw : contracts) {
+            for (ContractLineItemWrapper cli : cw.lines) {
+              
+              System.debug('------------Check This-----------> CLI = ' + cli.selected);
+              
+                if (cli.selected) {
+
+                    Products_to_be_Released__c rpi = new Products_to_be_Released__c();
+                    rpi.Account__c = accountId;
+          rpi.Asset__c = cli.cli.AssetId;                     
+                    rpi.Contract_Line_Item__c = cli.cli.Id;
+
+          rpi.NS_Contract__c = cli.cli.ServiceContract.NS_Internal_ID__c;
+          rpi.NS_Contract_Line__c = cli.cli.NS_Internal_ID__c;
+          rpi.NS_Sales_Order__c = cli.cli.SalesOrderNumber__c;
+          rpi.NS_Sales_Order_Line__c = cli.cli.ContractLineItem__c;
+
+                    rpi.Opportunity__c = opportunityId;
+          rpi.Product__c = cli.cli.PricebookEntry.Product2Id;   
+          rpi.Service_Contract__c = cli.cli.ServiceContractId;                 
+                    
+                    // Decimal.valueOf(cli.quantity);
+
+          rpAdd.add(rpi);          
+                }
+            }    
+        }
+
+    if (rpDel.size() > 0)
+      delete rpDel;
+        
+        if (rpAdd.size() > 0)
+          insert rpAdd;
+            
+    return new PageReference(ApexPages.currentPage().getParameters().get('cancelURL'));
+  }
+      
+    public static String getFormattedDate(Date d){
+        return d!=null ? d.month()+'/'+d.day()+'/'+d.year() : null;
+    }
+
+    public class ContractWrapper {
+        public String startDate {get; set;}
+        public String endDate {get; set;}
+        public ServiceContract c {get; set;}
+        public Boolean selected {get;set;}  
+        public List<ContractLineItemWrapper> lines {get; set;}
+        public ContractWrapper(ServiceContract c, Account acct) {
+            this.c = c;
+            this.selected = false;
+            this.startDate = ReleasedProductsPickerExtention.getFormattedDate(c.StartDate);
+            this.endDate = ReleasedProductsPickerExtention.getFormattedDate(c.EndDate);
+            this.lines = new List<ContractLineItemWrapper>();
+        }
+    }
+    
+    public class ContractLineItemWrapper {
+      public String selectedProduct {get;set;}
+        public String startDate {get; set;}
+        public String endDate {get; set;}
+        public Boolean selected {get; set;}
+        public ContractLineItem cli {get; set;}
+        public String quantity {get;set;}
+        public String productName {get;set;}        
+        public String priceLevel {get;set;}
+        // public List<SelectOption> products {get;set;}
+        public ContractLineItemWrapper(ContractLineItem cli) {
+            this.cli = cli;
+            this.selected = false;
+            this.quantity = String.valueOf(cli.quantity).replace('.00','');
+            this.startDate = ReleasedProductsPickerExtention.getFormattedDate(cli.StartDate);
+            this.endDate = ReleasedProductsPickerExtention.getFormattedDate(cli.EndDate);
+            this.priceLevel = cli.Item_Group_Price_Level__c != null ? cli.Item_Group_Price_Level__c : cli.Price_Level__c;
+          // products = new List<SelectOption>();
+        }
+    }
+    
+    static testmethod void testNewOpportunityExtension(){
+        
+        Account a = new Account();
+        a.name = 'test';
+        a.ShippingCountry = 'US';
+        insert a;
+        
+    Product_Master__c pm = new Product_Master__c();
+    pm.Name = 'Test Product Master';
+    insert pm; 
+        
+    Opportunity o = new Opportunity();
+    o.Name = 'Opp: ' + a.Name;
+    o.CloseDate = system.now().date().addDays(7);
+    o.StageName = 'Prospecting';
+    insert o;         
+        
+      Pricebook2 pr = [select id from pricebook2 where name = 'Standard Price Book'][0];
+      
+      Product2 pd = new Product2();
+      pd.productcode = 'abc123-Base Price-0';
+      pd.name = 'abc123';
+      pd.Is_Serviceable__c=true;
+      insert pd;
+      
+      PriceBookEntry pe = new PriceBookEntry();
+      pe.Pricebook2Id = pr.id;
+      pe.Product2Id = pd.id;
+      pe.isactive = true;
+      pe.unitprice = 10;
+      insert pe;
+        
+        ServiceContract sc = new ServiceContract();
+        sc.AccountId = a.id;
+        sc.name = 'abc123';
+    sc.ApprovalStatus = 'Draft';
+        sc.startdate = system.today();
+        sc.enddate = system.today().addDays(365);  
+        sc.Pricebook2Id = pr.Id;  
+        insert sc;
+        
+        ContractLineItem cli = new ContractLineItem();
+        cli.servicecontractid = sc.id;
+        cli.quantity = 1;
+        cli.unitprice = 1;
+        cli.discount = 1;
+        cli.pricebookentryid = pe.id;
+        cli.ContractLineItem__c = 'NS123456';
+        cli.Product_Master__c = pm.Id;
+        cli.Account_Name__c = a.Id;
+        insert cli;
+
+        ApexPages.currentPage().getParameters().put('accountId', a.id);
+        ApexPages.currentPage().getParameters().put('opportunityId', o.id);
+        ApexPages.currentPage().getParameters().put('cancelURL', '/'+o.id);
+        
+        ReleasedProductsPickerExtention noe = new ReleasedProductsPickerExtention();
+        noe.init();
+        
+        noe.contracts[0].lines[0].selected = true;
+ 
+     noe.loadReleasedProducts();
+
+    noe.cancel();
+    } 
+    
+}

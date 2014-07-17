@@ -1,0 +1,221 @@
+/*****************************
+Author: Anupam Priyadarshi
+Title: Trigger for Validations on UOM, Price Schedules, Prod Rels Object
+Description: Trigger for Validating Unit of Measures(aka UOMs), Price Schedules, Prod Relationship on the Product Object
+Ref#: 
+Open Issues (remove when resolved): N/A
+See test Method.
+Revision History: 
+02/12/2013 - Created
+02/13/2013 - Added pricebook entry related processing
+02/15/2013 - Added the isAfter and isBefore logic
+03/08/2013 - Added logic based on product price schedule and UOM
+03/19/2013 - TFS Task#209648 Packages are not allowed as Pre-Reqs
+04/26/2013 - Modified Contains logic not required for ala carte packages
+*********************************/
+trigger Order2CashValidationRuleTrigger on Product2 (/*before insert, */ before update, after insert) {
+    static boolean isDone = false;          
+    //retrieving the set of productIDs
+    set<Id> productIDs = trigger.newMap.keySet();
+    /*set<Id> productIDs = new set<Id>();
+    for(Product2 prod:Trigger.new){
+        productIDs.add(prod.Id);
+    }*/
+        
+    //creating maps of all the UOMs associated with the product
+    map<string, map<string, m_Product_UOM__c>> productUOMs = new map<string, map<string, m_Product_UOM__c>> ();
+    for(m_Product_UOM__c ps: [select id, Product_Code__c, m_LU_UOM__c, m_Term_Unit__c 
+                              from m_Product_UOM__c 
+                              where Product_Code__c IN :productIDs]){
+        if(!productUOMs.containsKey(ps.Product_Code__c)){
+            productUOMs.put(ps.Product_Code__c,new map<string, m_Product_UOM__c>());    
+        }
+        map<string,m_Product_UOM__c> uom = productUOMs.get(ps.Product_Code__c);
+        uom.put(ps.id,ps);
+        productUOMs.put(ps.Product_Code__c, uom);
+    }   
+    //creating maps of all the active price sechedules for the product
+    map<string, map<string, m_Product_Price_Schedule__c>> priceSchedules = new map<string, map<string, m_Product_Price_Schedule__c>>();
+    for(m_Product_Price_Schedule__c ps:[SELECT Id, Product__c, Status__c, Start_Date__c, End_Date__c, Region__c, Account_ID__c,License_Unit__c 
+                                         FROM m_Product_Price_Schedule__c
+                                         WHERE product__c IN :productIds 
+                                         and Status__c='Active']){
+        if(!priceSchedules.containsKey(ps.Product__c)){
+                priceSchedules.put(ps.Product__c,new map<string, m_Product_Price_Schedule__c>());
+        }                       
+        map<string, m_Product_Price_Schedule__c> mp = priceSchedules.get(ps.Product__c);
+        mp.put(ps.Id,ps);
+        priceSchedules.put(ps.Product__c,mp);                            
+    }
+    //creating maps of all the prodRelationships for the product
+    map<string, map<string,m_Product_Relationship__c>> productRelationships = new map<string, map<string,m_Product_Relationship__c>>();
+    for(m_Product_Relationship__c ps: [select m.id, m.Product_Code__c, m.Relation_Type__c, m.Related_Product_Code__c, m.Related_Product_Code__r.Is_Package__c
+                                       from m_Product_Relationship__c m  
+                                       where Product_Code__c IN :productIDs /* and Relation_Type__c = 'Contains'*/]){
+        if(!productRelationships.containsKey(ps.Product_Code__c)){
+            productRelationships.put(ps.Product_Code__c,new map<string, m_Product_Relationship__c>());  
+        }
+        map<string,m_Product_Relationship__c> prodRel = productRelationships.get(ps.Product_Code__c);
+        prodRel.put(ps.id,ps);
+        productRelationships.put(ps.Product_Code__c, prodRel);          
+    }
+    //get the active standard and canadian pricebooks
+    list<Pricebook2> standardPricebook = [SELECT Id, Name, IsActive FROM Pricebook2 where Name='Standard Price Book' and IsActive=true];
+    list<Pricebook2> canadianPricebook = [SELECT Id, Name, IsActive FROM Pricebook2 Where Name='Canadian Standard Price Book' and IsActive=true];
+        
+    //map for standard pricebook entry
+    map<string, map<string,PricebookEntry>> pbsEntry = new map<string, map<string,PricebookEntry>>();
+    for(PricebookEntry ps:[Select p.id, p.UseStandardPrice, p.UnitPrice, p.Product2Id, p.Pricebook2Id, p.Name
+                                    From PricebookEntry p
+                                    WHERE p.Product2Id IN :productIds
+                                    AND p.pricebook2Id=:standardPricebook[0].id]){
+        if(!pbsEntry.containsKey(ps.Product2Id)){
+            pbsEntry.put(ps.Product2Id,new map<string, PricebookEntry>());  
+        }
+        map<string,PricebookEntry> pricebooksMap = pbsEntry.get(ps.Product2Id);
+        pricebooksMap.put(ps.id,ps);
+        pbsEntry.put(ps.Product2Id, pricebooksMap);
+                                        
+     }
+    // map for canadian pricebook entry
+    map<string, map<string,PricebookEntry>> pbcEntry = new map<string, map<string,PricebookEntry>>();
+    for(PricebookEntry ps:[Select p.id, p.UseStandardPrice, p.UnitPrice, p.Product2Id, p.Pricebook2Id, p.Name
+                                    From PricebookEntry p
+                                    WHERE p.Product2Id IN :productIds
+                                    AND p.pricebook2Id=:canadianPricebook[0].id]){
+        if(!pbcEntry.containsKey(ps.Product2Id)){
+            pbcEntry.put(ps.Product2Id,new map<string, PricebookEntry>());  
+        }
+        map<string,PricebookEntry> pricebookcMap = pbcEntry.get(ps.Product2Id);
+        pricebookcMap.put(ps.id,ps);
+        pbcEntry.put(ps.Product2Id, pricebookcMap);                                     
+     }          
+    list<PricebookEntry> newPricebookEntry = new  list<PricebookEntry>();
+    
+    for(Product2 prod:Trigger.new){ //start of trigger loop
+        if (!isDone){
+            if ((trigger.isInsert || trigger.isUpdate) /*&& trigger.isBefore*/){
+                if(prod.IsActive && prod.Business_Unit__c=='APD' && prod.Department__c=='Repair'){
+                        if (prod.Status__c != 'Approved'){
+                            //prod.IsActive=false;
+                            prod.addError('You can not activate the product without being approved.');
+                        }
+                        if (prod.NS_Internal_ID__c==null){
+                            prod.addError('You can not activate the product without a netsuite internal id.');
+                        }
+                        
+                        if(!productUOMs.containsKey(prod.Id)){
+                            prod.addError('There should be at least one UOM record existing to activate this Product.');                        
+                        }
+                        if(prod.Can_be_Sold__c){
+                            if(!priceSchedules.containsKey(prod.Id)){
+                                 prod.addError('There should be at least one active price schedule to activate this product and to make Can Be Sold to be true.');
+                            }
+                        }
+                        if(productUOMs.containsKey(prod.Id) && priceSchedules.containsKey(prod.Id)){
+                            
+                            for(m_Product_UOM__c puom:productUOMs.get(prod.Id).values()){
+                                boolean isPriceSchedule = false; 
+                                for(m_Product_Price_Schedule__c psd:priceSchedules.get(prod.Id).values()){
+                                    if ((puom.m_LU_UOM__c==psd.License_Unit__c)){
+                                        isPriceSchedule = true;
+                                        break;
+                                        
+                                    }
+                                }
+                                if (!isPriceSchedule)
+                                    prod.addError('There should be atleast one matching active price schedule for this product UOM::'+puom.m_LU_UOM__c);
+                            }               
+                        }
+                        
+                        //checking if packages can be a pre-reqs
+                        boolean hasPreReqAsPackage = false;
+                        if(productRelationships.containsKey(prod.Id)){
+                            for(m_Product_Relationship__c prel: productRelationships.get(prod.Id).values()){
+                                if (prel.Relation_Type__c =='Pre-Req' || prel.Relation_Type__c =='Pre-Req Any 1'){
+                                    if (prel.Related_Product_Code__r.Is_Package__c){
+                                        hasPreReqAsPackage = true;
+                                        break;
+                                    }
+                                }                               
+                            }       
+                        }
+                        if (hasPreReqAsPackage){prod.addError('Packages are not allowed as pre-req or pre-req any 1');}
+                        
+                        //package specific validations
+                        boolean hasContains = false;
+                        if (prod.Is_Package__c){
+                            if (prod.m_Package_Type__c!='Ala Carte'){
+                                if(productRelationships.containsKey(prod.Id)){
+                                for(m_Product_Relationship__c prel: productRelationships.get(prod.Id).values()){
+                                    if (prel.Relation_Type__c =='Contains'){
+                                        hasContains = true;
+                                        break;
+                                    }
+                                }
+                            }
+                                if (!hasContains){prod.addError('There should be atleast one Contains ProductRelationship if product is marked as package');}                               
+                            }
+                       
+                            
+                            //checking for package types
+                            if (prod.m_Package_Type__c==null){
+                                prod.addError('Package type is a required field if this product is marked as package');
+                            }
+                            else {
+                                    if (prod.m_Package_Type__c=='Pick N of M'){
+                                        if (prod.m_Num_Products_To_Select__c <=0){
+                                            prod.addError('Please specify the (m)# no of products to be selected when (m) package type is Pick N of M');
+                                        }
+                                    }           
+                            }                               
+                        }                       
+                        else
+                        {
+                            if(productRelationships.containsKey(prod.Id)){
+                                for(m_Product_Relationship__c prel: productRelationships.get(prod.Id).values()){
+                                    if (prel.Relation_Type__c =='Contains'){
+                                        hasContains = true;
+                                        break;
+                                    }
+                                }                               
+                                
+                                if (hasContains){
+                                    prod.IsActive=false; 
+                                    prod.addError('Non-packagae product should not have contains relationships');                                   
+                                }
+                                
+                            }
+                        }                   
+                    }//end of isActive
+                }//end of if trigger.isInsert or trigger.isUpdate check 
+               if (trigger.isInsert && trigger.isAfter){
+                        //list<PricebookEntry> newPricebookEntry = new  list<PricebookEntry>();
+                        if(/*prod.IsActive && */prod.Business_Unit__c=='APD' && prod.Department__c=='Repair'){
+                            if (!pbsEntry.containsKey(prod.id)){
+                                PricebookEntry newStandardPricebookEntry = new PricebookEntry();
+                                newStandardPricebookEntry.Pricebook2Id = standardPricebook[0].id;
+                                newStandardPricebookEntry.Product2Id = prod.Id;
+                                newStandardPricebookEntry.UnitPrice=0.0;
+                                newStandardPricebookEntry.IsActive = true;
+                                newPricebookEntry.add(newStandardPricebookEntry);
+                            }
+                            if (!pbcEntry.containsKey(prod.id)){
+                                PricebookEntry newcanadianPricebookEntry = new PricebookEntry();
+                                newcanadianPricebookEntry.Pricebook2Id = canadianPricebook[0].id;
+                                newcanadianPricebookEntry.Product2Id = prod.Id;
+                                newcanadianPricebookEntry.UnitPrice=0.0;
+                                newcanadianPricebookEntry.IsActive = true;
+                                newcanadianPricebookEntry.UseStandardPrice = true;
+                                newPricebookEntry.add(newcanadianPricebookEntry);
+                            }               
+                            
+                        }
+                    
+                }//end of if trigger.isInsert && trigger.afterInsert
+                isDone = true;  
+        }//end of isDone
+    }//end of trigger loop
+    if (newPricebookEntry!=null && newPricebookEntry.size()>0)
+        insert newPricebookEntry;
+}//end of trigger class

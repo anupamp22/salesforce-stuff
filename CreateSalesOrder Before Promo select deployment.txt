@@ -1,0 +1,1226 @@
+/*
+ * Developer: Sirish Aramandla
+ * Title: Sales Order Generation
+ * Description: When the user clicks 'Create Sales Order' button on Opportunity, a new Sales Order record and corresponding Sales Order line items are added
+ * Revisions' History:
+ * 03-29-13 updated for dates in line splits 
+ updated 04-05-2013
+ updated 04-10-2013 added debug statements
+ Updated Shipping Methods to include NAGS code
+ 4-17-2013 Fixed the 4 reported bugs
+ 04-23-2013 fixed the price calc for financed items
+ 04-23-2013 removed creating shipping codes for trial orders. Rush ship will still be charged
+ Partial Term Discount Calculation is not implemented yet.
+ To implement Partial Term Discount fully price calculation for first line in AddSplitSOLines will need to change 
+ Price Calc should account for applying the discount. - not implemented
+ Now that negative lines are being supported it is possible to fully implement Amount on Order
+ order level amount discount would appear just like migration credit a negative line - not implemented
+ 04/29/2013 Test method
+ 04/30/2013 Contract start and end dates for coterm 
+ 05/06/2013 Fixed the Statndard shipping lines to pick up the price when type is 'Linear' & 'Flat'
+ 05/07/2013 If the Prod Rel Line is either license term or publication term then the billing schedule is same as the Opportunity Line
+            Otherwise Billing Schedule is Null
+ 05/07/2013 Log Netsuite errors in NS_SF_Integration_Error__c
+ 05/07/2013 For Glass Publications, Set Renewal Type to 'Non Renewing'
+ 05/08/2013 Billing schedule for Related prod line needs to be initialized inside the for loop
+ 05/10/2013 Updated ValidateSOGenerationRules method for coterm to mimic how the term is dictated on opp (otherwise the validation was always failing)
+*/ 
+ 
+public class CreateSalesOrder extends CommonObj {
+ 
+     //Constructor
+     public CreateSalesOrder(){ }
+
+     //Extension Constructor   
+     public CreateSalesOrder(ApexPages.StandardController stdController){
+        this.opp = (Opportunity)stdController.getRecord();
+     }
+
+        private Opportunity opp; 
+        private OpportunityLineItem[] oppProducts; // all products from opportunity line item
+        private Task[] oppTasks;
+        private Opportunity_Promo__c[] oppPromos;
+        private Promotions__c[] promotions;
+        private Sales_Order__c[] oppSo;
+        private SF_NS_Integration__c SFNSIntegration;
+        private SF_NS_Billing_Schedule__c[]   SFNSBillingSchedule;
+        private SF_NS_Shipping_Method__c[] SFNSShippingMethod;
+        private SF_NS_Order_Type__c  SFNSOrderType;
+
+        public Sales_Order__c newSO{get;set;}
+        public Sales_Order_Item__c[] newSOLines{get;set;}
+        public Sales_Order_Team__c[] newSalesTeam{get;set;}
+
+        private string msg; 
+        private boolean IsCreditHold = false; 
+        private string NSInternalIdShipTo;
+        private string NSInternalIdBillTo;
+        private string partnerId;
+        private string employeeNumber, salesRole;
+        private boolean ispPrimary;
+        private integer contribution;
+        private string accountRegion;
+        private Product2[] shippingProducts = new Product2[]{};
+        private boolean excludeRenewal;
+        private string shipMethod;
+        private string RenewalType = '2';//default Renewal Type: 2 - Renews with Sales Order
+        private boolean updateSo = false;
+        private string payTerm; //payment term
+        decimal conTerm; //contract term
+        private string[] promoCodes = new list<string>();   
+        private string contractId;
+        private datetime soStartDate, soEndDate, contractStartDate, contractEndDate, soNewStartDate;
+        private integer contractTerm;
+        private integer soContractTerm;
+        private boolean isCoterm;
+        private m_Product_Relationship__c[] prodRel; 
+           
+        
+        //Variables declaration for Sales Order Items
+        private String productInternalId;
+        private string productId;
+        private decimal qty;
+        private decimal mediaQty;
+        private string priceLevel;
+        private integer discount;
+        private string orderType, packageCode;
+        private string contractType = '1';
+        private string billingScheduleforLine, billingScheduleforRelLine, billingScheduleforLine1, billingScheduleforLine2;
+        private string description;
+        private boolean isSingleUserLicense = false;
+        private String promoType; 
+        private boolean isApplicableToAllProducts; 
+        private boolean isLinesplit = false;
+        private boolean isFreeTerm = false;
+    private boolean isTrial = false;
+        private boolean isPartialTerm = false;
+        private integer promoMonths = 0;
+        private string months;
+        private decimal bundlingPriceAfterDiscount, paymentRecurring, paymentUpfront, licenceQty, listPrice, listPrice1, listPrice2;
+        private datetime soLineStartDate, soLineEndDate, soLineStartDate1, soLineEndDate1, soLineStartDate2, soLineEndDate2, maxEndDate;
+        private integer soLineTerm, soLineTerm1, soLineTerm2;
+        private boolean excludeRenewal1, excludeRenewal2;
+        private Promo_Products__c[] promoProducts;
+        private m_Product_Price_Schedule__c[] shippingPriceSchedule;
+        private string[] oppProductid = new List<String>();
+        private boolean isFinanced;
+        private boolean glassPublication = true;
+        
+        private Set<string> US = new Set<String>{'US', 'USA'};
+        private Set<string> CANADA = new Set<String>{'CAN', 'CA', 'Canada'};
+        private string ACCOUNTREGIONUS;
+        private string ACCOUNTREGIONCANADA;
+        private string ACCOUNTREGIONINTL;
+        private string GOV;
+        private string RENEWTYPE4;
+        private string SFSALESORDER;
+        private string SFBILLINGSCHEDULE;
+        private string SFORDERTYPE;
+        private string CLOSEDWON;
+        private string COMPLETED6;
+        private string SUBMITTEDORDER;
+        private string OKAYTOSHIP;
+        private string COMPLETED;
+        private string CANCELLED;
+        private string NONE;
+        private string PAYINFULL;
+        private string RECTYPESORDER;
+        private string NEWORDER;
+        private string DPMT;
+        private string FNC;
+        private string PUBLICATION;
+        private string PUBLICATIONTERM;
+        private string FREETERM;
+        private string PARTIALTERM;
+        private string LICENSETERM;
+        private string LICENSEPERPETUAL;
+        private string HARDWARE;
+        private string MIGRATION;
+        private string RECURRING;
+        private string INSERTOPERATION;
+        private string CONTRACTTYPEPUBLICATION;
+        private string CONTRACTTYPEEULA;
+        private string RENEWSWITHQUOTE;
+        private string ANNUALLY;
+        private string GLASSBU;
+        private string GLASSDEPT;
+        private string GLASSPRODLINE1;
+        private string GLASSPRODLINE2;
+        private string GLASSSUBPROD1;
+        private string GLASSSUBPROD2;
+                
+        //Error messages
+        private static final string OPPNOTFOUND = 'Opportunity Not Found';
+        private static final string SONOTGENERATED = 'Sales Order not generated';
+        private static final string SOEXISTS = 'Sales Order already exists for this Opportunity';
+        private static final string STAGEANDSTATUS = 'Sales Orders can only be generated when Opportunity stage = Closed Won and status = 2-Submitted Order';
+        private static final string NSBILLTONOTFOUND = 'NetSuite Id for Bill-to Customer is unknown.';
+        private static final string NSSHIPTONOTFOUND = 'NetSuite Id for Ship-to Customer is unknown.';
+        private static final string CREDITHOLD = 'Customer is on Credit Hold.';
+        private static final string TASKSNOTCOMPLETE = 'All Required Tasks on the Opportunity are not complete.';
+        private static final string CONTRACTTERMNOTKNOWN = 'Contract Term is not known.';
+        private static final string CONTRACTENDDATEINVALID = 'Contract end date cannot be before SO end date';
+        private static final string CONTRACTTERMFORANNUAL = 'Contract Term is should be greater than 12 when Payment Term is Annually. Sales Order not generated';
+        private static final string MULTIPLEPROMOS = 'Multiple Free/Partial Term Promos found. Sales Order not generated';
+        private static final string NETSUITESONOTINSERTED = 'SO not inserted in Netsuite';
+        private static final string NOPRODUCTS = 'No Products on the Opportunity';
+        
+        
+        CommonObj.CommonLib cLib=new CommonObj.CommonLib(); 
+        CommonObj.CommonException cEx=new CommonObj.CommonException(); 
+
+        public PageReference SubmitOrder(){
+
+            String strOppId = ApexPages.currentPage().getParameters().get('id'); 
+          
+            ID OppId = strOppId;
+            try{
+               if (OppId == null)throw new CommonException('Opportunity Not Found',CommonExceptionType.NoOpportunityInfo);
+            } catch(CommonException cEx) {
+            //  cEx.notifyViaEmail(CommonObj.developerEmails);
+            }  
+
+            PageReference pageRef = new PageReference('/' + OppId);
+            pageRef.setRedirect(true);
+            try{    
+            GenerateOrder(strOppId);
+                //throw new CommonException('Error strings returned from NetSuite',CommonExceptionType.NetSuiteError);
+            }catch(CommonException cEx){
+            //  cEx.notifyViaEmail(CommonObj.developerEmails);
+            AddMessages(SONOTGENERATED);
+            }
+
+            if (ApexPages.hasMessages()== true){
+               return null;
+            }
+            else 
+            return pageRef;
+            }//End method SubmitOrder
+
+        public PageReference ReturnToOpportunity(){
+               String strOppId1 = ApexPages.currentPage().getParameters().get('id'); 
+               ID OppId1 = strOppId1;
+    
+               PageReference pageRef1 = new PageReference('/' + OppId1);
+               pageRef1.setRedirect(true);
+               return pageRef1;
+
+        }//End method ReturnToOpportunity
+       
+        public void GenerateOrder(String strOppId){
+                               
+                FetchAllData(strOppId);
+                if (ValidateSOGenerationRules()== true){
+                    InsertSalesOrder();
+                    InsertSalesOrderLines();
+                    UpdateSalesOrderLines();
+                    UpdateSalesOrder();
+                    InsertSalesTeam();
+                    InsertNetSuiteSalesOrder();
+                }
+                
+        }//End method GenerateOrder
+       
+       public void FetchAllData(String strOppId){
+                
+            ID OppId = strOppId;
+            if (OppId == null) {
+                AddMessages(OPPNOTFOUND);
+                    return;
+            }   
+            
+            SF_NS_Sales_Order__c[] SFNSSalesOrders =    SF_NS_Sales_Order__c.getall().values();
+            
+             ACCOUNTREGIONUS = SFNSSalesOrders[0].ACCOUNTREGIONUS__c;
+             ACCOUNTREGIONCANADA = SFNSSalesOrders[0].ACCOUNTREGIONCANADA__c;
+             ACCOUNTREGIONINTL = SFNSSalesOrders[0].ACCOUNTREGIONINTL__c;
+             GOV = SFNSSalesOrders[0].GOV__c;
+             RENEWTYPE4 = SFNSSalesOrders[0].RENEWTYPE4__c;
+             SFSALESORDER = SFNSSalesOrders[0].SFSALESORDER__c;
+             SFBILLINGSCHEDULE =SFNSSalesOrders[0].SFBILLINGSCHEDULE__c;
+             SFORDERTYPE = SFNSSalesOrders[0].SFORDERTYPE__c;
+             CLOSEDWON = SFNSSalesOrders[0].CLOSEDWON__c;
+             COMPLETED6 = SFNSSalesOrders[0].COMPLETED6__c;
+             SUBMITTEDORDER = SFNSSalesOrders[0].SUBMITTEDORDER__c;
+             OKAYTOSHIP = SFNSSalesOrders[0].OKAYTOSHIP__c;
+             COMPLETED = SFNSSalesOrders[0].COMPLETED__c;
+             CANCELLED = SFNSSalesOrders[0].CANCELLED__c;
+             NONE = SFNSSalesOrders[0].NONE__c;
+             RECTYPESORDER = SFNSSalesOrders[0].RECTYPESORDER__c;
+             NEWORDER = SFNSSalesOrders[0].NEWORDER__c;
+             DPMT = SFNSSalesOrders[0].DPMT__c;
+             FNC = SFNSSalesOrders[0].FNC__c;
+             PUBLICATION = SFNSSalesOrders[0].PUBLICATION__c;
+             PUBLICATIONTERM = SFNSSalesOrders[0].PUBLICATIONTERM__c;
+             LICENSEPERPETUAL = SFNSSalesOrders[0].LICENSEPERPETUAL__c;
+             HARDWARE = SFNSSalesOrders[0].HARDWARE__c;
+             FREETERM = SFNSSalesOrders[0].FREETERM__c;
+             PARTIALTERM = SFNSSalesOrders[0].PARTIALTERM__c;
+             LICENSETERM = SFNSSalesOrders[0].LICENSETERM__c;
+             MIGRATION = SFNSSalesOrders[0].MIGRATION__c;
+             RECURRING = SFNSSalesOrders[0].RECURRING__c;
+             INSERTOPERATION = SFNSSalesOrders[0].INSERTOPERATION__c;
+             CONTRACTTYPEPUBLICATION = SFNSSalesOrders[0].CONTRACTTYPEPUBLICATION__c;
+             CONTRACTTYPEEULA = SFNSSalesOrders[0].CONTRACTTYPEEULA__c;
+             RENEWSWITHQUOTE = SFNSSalesOrders[0].RENEWSWITHQUOTE__c;
+             ANNUALLY = SFNSSalesOrders[0].ANNUALLY__c;
+             GLASSBU = SFNSSalesOrders[0].GLASSBU__c;
+            GLASSDEPT = SFNSSalesOrders[0].GLASSDEPT__c;
+           GLASSPRODLINE1 = SFNSSalesOrders[0].GLASSPRODLINE1__c;
+           GLASSPRODLINE2 = SFNSSalesOrders[0].GLASSPRODLINE2__c;
+           GLASSSUBPROD1 = SFNSSalesOrders[0].GLASSSUBPROD1__c;
+           GLASSSUBPROD2 = SFNSSalesOrders[0].GLASSSUBPROD2__c;
+              
+                
+            // Main SOQL to fetch all the data needed
+            // Fetching Opportunity and Opportunity Line Item Data
+            // If Data from Product2 is needed that can be added to the inner SELECT
+             
+            //opp = [SELECT bill_to_account__c,bill_to_account__r.NS_Internal_ID__c,bill_to_account__r.Credit_Hold_Type__c,Account.Mktseg__c,accountid,Account.NS_Internal_ID__c, po_check_no__c,order_number__c, Owner.NS_Partner_ID__c, Owner.EmployeeNumber,  owner.NetSuite_Internal_ID__c, owner.Manager.NetSuite_Internal_ID__c, Billing_Country__c, sales_rep_id__c,preferred_shipping_method__c,Contract_Term__c, Contract_Type__c, Contract_Start_Date__c, Contract_End_Date__c, RUSH_Order__c, Payment_Term__c, Is_Co_Term__c, Co_Term_Service_Contract__c, Co_Term_Service_Contract__r.StartDate, Co_Term_Service_Contract__r.EndDate, Co_Term_Service_Contract__r.Term,Co_Term_Service_Contract__r.NS_Internal_ID__c, Payment_Type__c, StageName, order_status__c, Type, Migration_Credits__c, Migration_Credits_Applicable_till__c, m_Financed__c, (SELECT Id, PricebookEntry.Product2Id,  PricebookEntry.Product2.ProductCode, PricebookEntry.Product2.Is_Package__c,Downpayment_Product_ID__c, m_Finance_Charge__c, quantity,ListPrice,Order_Type__c, PricebookEntry.Product2.NS_Internal_ID__c, PricebookEntry.Product2.Item_Category__c, PricebookEntry.Product2.Single_User_Licensing__c, Parent_Product__r.ProductCode, Parent_Product__c, Label_Sequence_Number__c, Bundling_Price_after_Discount__c, m_Payment_Recurring__c, m_Payment_Upfront__c, m_Licence_Quantity__c, PricebookEntry.Product2.Name,Payment_type__c FROM Opportunity.OpportunityLineItems), (SELECT Promotion_Discount_Charge__c,Promotion_Discount_Charge__r.Promo_Code__c, Promotion_Discount_Charge__r.Free_Term_Quantity__c FROM Opportunity_Promos__r), (Select Id, Required_for_Order_Form_Generation__c, Status From Tasks),(Select Name From Sales_Orders__r) FROM Opportunity where id = :OppId ];      
+            opp = [SELECT bill_to_account__c,bill_to_account__r.NS_Internal_ID__c,bill_to_account__r.Credit_Hold_Type__c,Account.Mktseg__c,accountid,Account.NS_Internal_ID__c, po_check_no__c,order_number__c, Owner.NS_Partner_ID__c, Owner.EmployeeNumber,  owner.NetSuite_Internal_ID__c, owner.Manager.NetSuite_Internal_ID__c, Billing_Country__c, sales_rep_id__c,preferred_shipping_method__c,Contract_Term__c, Contract_Type__c, Contract_Start_Date__c, Contract_End_Date__c, RUSH_Order__c, Payment_Term__c, Is_Co_Term__c, Co_Term_Service_Contract__c, Co_Term_Service_Contract__r.StartDate, Co_Term_Service_Contract__r.EndDate, Co_Term_Service_Contract__r.Term,Co_Term_Service_Contract__r.NS_Internal_ID__c, Payment_Type__c, StageName, order_status__c, Type, Migration_Credits__c, Migration_Credits_Applicable_till__c, m_Financed__c, (SELECT Id, PricebookEntry.Product2Id,  PricebookEntry.Product2.ProductCode, PricebookEntry.Product2.Is_Package__c,Downpayment_Product_ID__c, m_Finance_Charge__c, quantity,ListPrice,Order_Type__c, PricebookEntry.Product2.NS_Internal_ID__c, PricebookEntry.Product2.Item_Category__c, PricebookEntry.Product2.Single_User_Licensing__c, Parent_Product__r.ProductCode, Parent_Product__c, Label_Sequence_Number__c, Bundling_Price_after_Discount__c, m_Payment_Recurring__c, m_Payment_Upfront__c, m_Licence_Quantity__c, PricebookEntry.Product2.Name,Payment_type__c, PricebookEntry.Product2.Sub_Product__c, PricebookEntry.Product2.Product_Line_NS__c, PricebookEntry.Product2.Department__c, PricebookEntry.Product2.Business_Unit__c FROM Opportunity.OpportunityLineItems), (SELECT Promotion_Discount_Charge__c,Promotion_Discount_Charge__r.Promo_Code__c, Promotion_Discount_Charge__r.Free_Term_Quantity__c FROM Opportunity_Promos__r), (Select Id, Required_for_Order_Form_Generation__c, Status From Tasks),(Select Name From Sales_Orders__r) FROM Opportunity where id = :OppId ];      
+    
+            oppProducts = opp.OpportunityLineItems ;
+            oppTasks = oppTasks = opp.Tasks;
+            oppPromos = opp.Opportunity_Promos__r; 
+            oppSo = opp.Sales_Orders__r;        
+            
+            isFinanced = opp.m_Financed__c;   
+            NSInternalIdShipTo = opp.Account.NS_Internal_ID__c;
+                    NSInternalIdBillTo = opp.bill_to_account__r.NS_Internal_ID__c;
+                    isCoterm = opp.Is_Co_Term__c;
+                    payTerm = opp.Payment_Term__c;
+                    conTerm = opp.Contract_Term__c;
+                    
+                    //Account Region
+            if(US.contains(opp.Billing_Country__c)){
+                accountRegion = ACCOUNTREGIONUS;
+            }else if (CANADA.contains(opp.Billing_Country__c)){
+                accountRegion = ACCOUNTREGIONCANADA;
+            }else {
+                accountRegion = ACCOUNTREGIONINTL;
+                    }
+                    
+           //excludeRenewal
+           if (opp.Account.Mktseg__c == GOV){
+                excludeRenewal = true;
+                RenewalType = RENEWTYPE4;
+            } else {
+                excludeRenewal = false;
+            }
+        
+            // Get static values of NetSuite Internal Ids for the Integration from Custom Settings
+            SFNSIntegration = SF_NS_Integration__c.getInstance(SFSALESORDER);
+            SFNSOrderType = SF_NS_Order_Type__c.getInstance(SFORDERTYPE);
+            SFNSBillingSchedule =   SF_NS_Billing_Schedule__c.getall().values();
+            SFNSShippingMethod =    SF_NS_Shipping_Method__c.getall().values();
+            
+                //Shipping method
+            shipMethod = opp.Preferred_Shipping_Method__c;
+ 
+        }//End method FetchAllData
+           
+        public boolean ValidateSOGenerationRules(){
+            boolean passedValidation = true;
+            //Check to see if Sales Order already Exists
+            if (OppSo.size() > 0){
+                AddMessages(SOEXISTS);
+            passedValidation = false;
+            }
+            //Check to see if Stage = Closed Won and Status = 2-Submitted - Order
+            
+            if ((opp.StageName != CLOSEDWON) || !((opp.Order_Status__c == COMPLETED6) ||(opp.Order_Status__c == SUBMITTEDORDER))){
+                AddMessages(STAGEANDSTATUS);
+            passedValidation = false;
+            }
+            //Check that there are Opportunity Lines
+            if(!(oppProducts.size()>0)){
+              AddMessages(NOPRODUCTS);
+                passedValidation = false;
+            }
+            
+            //Check to see if Bill-to Customer exists in Netsuite
+            if(NSInternalIdBillTo == null){
+                AddMessages(NSBILLTONOTFOUND);
+                passedValidation = false;
+            }
+            //Check to see if Ship-to Customer exists in Netsuite
+            if(NSInternalIdShipTo == null){
+                AddMessages(NSSHIPTONOTFOUND);
+                passedValidation = false;
+            }
+            //Check Credit Hold
+            if (opp.bill_to_account__r.Credit_Hold_Type__c == OKAYTOSHIP)
+                 IsCreditHold = false;
+            else
+                 IsCreditHold = true;
+            if (IsCreditHold == true) {
+                  AddMessages(CREDITHOLD);
+                  passedValidation = false;
+            }
+            //Check if all required Tasks for the opportunity are completed before creating Sales Order
+            for (Task tsk : oppTasks) {
+                if(tsk.Required_for_Order_Form_Generation__c == true){
+                        if (!((tsk.Status == COMPLETED)||(tsk.Status == CANCELLED))){
+                                AddMessages(TASKSNOTCOMPLETE);
+                                passedValidation = false;
+                        }
+                }           
+            } 
+            //Check to make sure Contract term on the Opportunity is not null
+            if (opp.Contract_Term__c == null){
+                AddMessages(CONTRACTTERMNOTKNOWN);
+                passedValidation = false;
+            }
+            //Coterm modified 5/10 to match derived approach
+            if ((isCoterm == true)&&(opp.Co_Term_Service_Contract__c!=null)){
+              Date todaysDate = System.now().date();
+                //Datetime dt = ((datetime.now()).addMonths(opp.Contract_Term__c.intValue())).addDays(-1);
+          Date dt = ((date.ValueOf(todaysDate)).toStartOfMonth()).addMonths(opp.Contract_Term__c.intValue()).addDays(date.ValueOf(opp.Co_Term_Service_Contract__r.StartDate).day() -1);
+          if (todaysDate.daysBetween(dt) >=15 )
+          { dt = dt.addMonths(-1);  }
+                if (opp.Co_Term_Service_Contract__r.EndDate < dt){
+                    AddMessages(CONTRACTENDDATEINVALID);
+                    passedValidation = false;
+                }
+            }
+            if (passedValidation == false){
+                AddMessages(SONOTGENERATED);
+                return false;
+            }else 
+                return true;
+        }//End method ValidateSOGenerationRules
+           
+     
+       public string getBillSchedule(string paymentTerm, decimal cTerm){
+            string billing;
+            if (paymentTerm == ANNUALLY){
+                if(cTerm < 12){
+                AddMessages(CONTRACTTERMFORANNUAL);
+                //return;
+                }
+                cTerm = cTerm.Divide(12, 0);
+                cTerm = cTerm.round(System.RoundingMode.CEILING);
+               // billSchedule = YEARLY + string.valueOf(conTerm);
+            }
+            for (SF_NS_Billing_Schedule__c bschedule: SFNSBillingSchedule){
+                if((bschedule.Term_Type__c == paymentTerm)&&(bschedule.Term_Length__c == null?cTerm:bschedule.Term_Length__c) == cTerm){
+                    billing = bschedule.NS_Internal_Id__c;
+                }
+            } 
+            return billing;
+       }//End method getBillSchedule
+       
+       public string getShipMethodInternalId(string ShippingMethod){
+            string InternalId;
+            for (SF_NS_Shipping_Method__c sMethod: SFNSShippingMethod){
+                if((ShippingMethod == null)&&(sMethod.Default_Standard_ShipMethod__c == true)){
+                    InternalId = sMethod.NS_ShipMethod_Internal_Id__c;
+                }else{
+                    if(sMethod.SF_Shipping_Method__c == ShippingMethod){
+                        InternalId = sMethod.NS_ShipMethod_Internal_Id__c;
+                        
+                    }
+                }
+            } 
+            return InternalId;
+       }//End method getShipMethod
+       
+        public string getShipProdInternalId(string ShipMethod){
+            string prodInternalId;
+            for (SF_NS_Shipping_Method__c sMethod: SFNSShippingMethod){
+                if(sMethod.NS_ShipMethod_Internal_Id__c == ShipMethod){
+                        prodInternalId = sMethod.NS_Ship_Prod_Internal_Id__c;
+                }
+            }
+            return prodInternalId;
+       }//End method getShipProdInternalId
+       
+       public void DeriveSalesTeam(){
+            //If the sales rep is a Mitchell Dealer, then populate the Partner field with the Opportunity Owner
+            // otherwise leave the partner field blank
+            if(opp.Owner.NS_Partner_ID__c == null){
+                partnerId = null;
+                // employeeNumber = opp.Owner.EmployeeNumber;
+                // string st = employeeNumber.substring(0,2); // remove the first two characters which are initials
+                // employeeNumber = 'e' + employeeNumber.removeStart(st); // add e as prefix to get the external id
+                employeeNumber = opp.Owner.NetSuite_Internal_ID__c;
+                salesRole = SFNSIntegration.salesRole__c;
+                ispPrimary = true;
+                contribution = 100;
+            } else{
+                partnerId = opp.Owner.NS_Partner_ID__c;
+                employeeNumber = opp.owner.Manager.NetSuite_Internal_ID__c;
+                salesRole = SFNSIntegration.salesRole__c;
+                ispPrimary = true;
+                contribution = 100;
+            }   
+       }//End method DeriveSalesTeam
+       
+       public void DeriveContractDates(){
+
+            soStartDate = (datetime.now()).addDays(SFNSIntegration.Lead_Days__c.intValue());
+            soEndDate = ((datetime.now()).addMonths(opp.Contract_Term__c.intValue())).addDays(SFNSIntegration.Lead_Days__c.intValue());
+        
+            if ((isCoterm == true)&&(opp.Co_Term_Service_Contract__c!=null)){
+              date newstdate; // need to check the boundary condition of current day is same as the day in contract startdate
+              if (date.ValueOf(opp.Co_Term_Service_Contract__r.StartDate).day()!= date.ValueOf(soStartDate).day()) {
+                newstdate = ((date.ValueOf(soStartDate)).toStartOfMonth()).addMonths(1).addDays(date.ValueOf(opp.Co_Term_Service_Contract__r.StartDate).day() -1);
+              } else {newstdate = date.ValueOf(soStartDate); }
+              
+                    contractId = opp.Co_Term_Service_Contract__r.NS_Internal_ID__c;
+                    contractStartDate = opp.Co_Term_Service_Contract__r.StartDate;
+                    contractEndDate = opp.Co_Term_Service_Contract__r.EndDate;
+                    contractTerm = opp.Co_Term_Service_Contract__r.Term;
+        if (soStartDate.date().daysBetween( newstdate) <15) {
+          soStartDate = newstdate;  
+        } else {
+          soStartDate = newstdate.addMonths(-1);
+        }                 
+            } else {
+                contractId = null;
+                contractStartDate = soStartDate;
+                contractEndDate = soEndDate;
+                contractTerm = opp.Contract_Term__c.intValue();
+                
+            }    
+       }//End method DeriveContractDates
+       
+       public void DerivePromoData(){
+            string prCode;
+            for (Opportunity_Promo__c promos : oppPromos) {
+                prCode = promos.Promotion_Discount_Charge__r.Promo_Code__c;
+                    promoCodes.add(prCode);
+            } 
+            if (promoCodes != Null){
+                promotions = [Select p.Promo_Type__c, p.Promo_Code__c, p.Promo_Category__c, p.Applicable_to_All_Products__c, Free_Term_Quantity__c,  (Select Product_Code__c, Product_Code__r.NS_Internal_ID__c From Promo_Products1__r) From Promotions__c p where p.Promo_Code__c in :promoCodes];
+            }
+       
+       }//End method DerivePromoData 
+       
+       public void InsertSalesOrder(){
+            DeriveSalesTeam();
+            DeriveContractDates();
+            DerivePromoData();
+            if (contractTerm == 0){
+                soContractTerm = null;
+            }else{
+              soContractTerm = contractTerm;
+            }
+            // Create the Sales Order Object
+            newSO = new Sales_Order__c(customForm__c = SFNSIntegration.customForm__c,
+                                        entity__c = NSInternalIdBillTo,
+                                        startDate__c = soStartDate,
+                                        //endDate__c = soEndDate,
+                                        custbody_mi_contract_type__c = '3', //EULA
+                                        custbody_mi_contract_id__c = contractId,
+                                        custbody_mi_contract_start_date__c = contractStartDate,
+                                        //custbody_mi_contract_end_date__c = contractEndDate,
+                                        custbody_mi_contract_term__c = contractTerm,
+                                        custbody_mi_renewal_type__c = RenewalType,
+                                        custbody_mi_renewal_term__c = contractTerm,
+                                        orderStatus__c = SFNSIntegration.orderStatus__c,
+                                        otherRefNum__c = opp.PO_Check_No__c,
+                                        custbody_mi_sfdc_opp_number__c = opp.Order_Number__c,
+                                        custbody_mi_type_of_order__c = SFNSIntegration.custbody_mi_type_of_order__c,
+                                        salesEffectiveDate__c = date.today(),
+                                        custbody_mi_rush_order__c = opp.RUSH_Order__c,
+                                            //salesRep__c = opp.Sales_Rep_ID__c, //DO Not populate this.Populate Sales Team
+                                        recordtype__c = RECTYPESORDER,
+                                        partner__c = partnerId,
+                                        //shipMethod__c = (string)SFNSIntegration.get(shipMethod),
+                                        shipMethod__c = getShipMethodInternalId(shipMethod),
+                                        custbody_mi_ship_to_customer__c = NSInternalIdShipTo ,
+                                        tranDate__c = datetime.now(),
+                                        custbody_sf_opp_id__c = Opp.Id,
+                                        Operation__c = INSERTOPERATION);
+        insert newSO;
+        }//End method InsertSalesOrder
+        
+        public void RelatedProductInfo(){
+           // integer k =0;  
+            string productCode; 
+            for (OpportunityLineItem OL : oppProducts){
+                productCode = OL.PricebookEntry.Product2.id;
+                oppProductid.add(productCode);
+            }
+            prodRel = [Select m.Product_Code__c, m.Product_Code__r.NS_Internal_ID__c, m.Relation_Type__c, m.Related_Product_Code__c,m.Related_Product_Code__r.Item_Category__c, m.Related_Product_Code__r.NS_Internal_ID__c, m.Related_Product_Code__r.Name, m.Related_Product_Code__r.IsActive, Related_Product__c From m_Product_Relationship__c m where m.Relation_Type__c in ('Order Processing Instructions', 'Shipping Fee', 'Download Fee', 'Processing Fee') and  m.Related_Product_Code__r.IsActive = true and m.Product_Code__c in :oppProductid];    
+        }//End method RelatedProductInfo
+    
+        public boolean InitializeSOItemValues(OpportunityLineItem OL){
+            productInternalId = OL.PricebookEntry.Product2.NS_Internal_ID__c;
+            productId = OL.PricebookEntry.Product2.Id;
+            qty = OL.Quantity;
+            priceLevel = SFNSIntegration.price__c;
+            //billingScheduleforLine = (string)SFNSBillingSchedule.get(billSchedule);// + ' months';
+            billingScheduleforLine = getBillSchedule(payTerm, conTerm);
+            discount = 0 ;
+            orderType = OL.Order_Type__c;
+            if (orderType == null){
+                orderType = NEWORDER;
+            }
+            if (orderType == 'Renewal') {
+              orderType = 'Renew';
+            } 
+            orderType = orderType + '__c';
+            orderType = orderType.replace('-', '_');
+            orderType = (string)SFNSOrderType.get(orderType); 
+            if (OL.Label_Sequence_Number__c != null){
+                description = OL.Label_Sequence_Number__c;
+            }else {
+                description = OL.PricebookEntry.Product2.Name;
+            }
+            
+            isSingleUserLicense = OL.PricebookEntry.Product2.Single_User_Licensing__c;
+            bundlingPriceAfterDiscount = OL.Bundling_Price_after_Discount__c;
+            paymentRecurring = OL.m_Payment_Recurring__c;
+            paymentUpfront = OL.m_Payment_Upfront__c;
+            licenceQty = OL.m_Licence_Quantity__c;
+                    
+            // If the product has Media to be shipped in Product Relations table then add Media to the Order Line Items
+            if(isSingleUserLicense = true){
+                mediaQty = qty;
+            } else {
+                mediaQty = 1;
+            }
+    
+            //List Price
+            if (bundlingPriceAfterDiscount <> 0){
+                listPrice = bundlingPriceAfterDiscount;
+            } else {
+                if (paymentRecurring <> 0) {
+                    listPrice = (paymentRecurring / licenceQty);
+                } else {
+                    billingScheduleforLine = null;
+                    listPrice = (paymentUpfront / licenceQty);
+                }
+            }
+      // upfront items when financed should have rate=listprice in NS
+            if ( (isFinanced == true)&&(OL.Payment_Type__c!='Upfront')&& (OL.Payment_Type__c!=null) &&
+                !((OL.PricebookEntry.Product2.Item_Category__c == LICENSETERM)||
+                (OL.PricebookEntry.Product2.Item_Category__c == PUBLICATIONTERM)) )
+            {   
+                listprice = listprice * contractTerm; 
+            }            
+                
+            //Package Code
+            if (OL.Downpayment_Product_ID__c != null){
+                packageCode = DPMT;
+                excludeRenewal = true;
+                billingScheduleforLine = null;
+            }else if (OL.m_Finance_Charge__c == true){
+                packageCode = FNC;
+                excludeRenewal = true;
+            }else {            
+                    packageCode = OL.Parent_Product__r.ProductCode;
+            } 
+                       
+                    
+            //Publication
+            if ((OL.PricebookEntry.Product2.Item_Category__c != PUBLICATION) || (OL.PricebookEntry.Product2.Item_Category__c != PUBLICATIONTERM)){
+                     contractType = CONTRACTTYPEEULA;
+            }
+            
+            //Glass Publication
+            if (!(((OL.PricebookEntry.Product2.Business_Unit__c == GLASSBU) && (OL.PricebookEntry.Product2.Department__c == GLASSDEPT) && (OL.PricebookEntry.Product2.Product_line_NS__C == GLASSPRODLINE1) && (OL.PricebookEntry.Product2.Sub_Product__c == GLASSSUBPROD1))
+               ||
+              ((OL.PricebookEntry.Product2.Business_Unit__c == GLASSBU) && (OL.PricebookEntry.Product2.Department__c == GLASSDEPT) && (OL.PricebookEntry.Product2.Product_line_NS__C == GLASSPRODLINE2) && (OL.PricebookEntry.Product2.Sub_Product__c == GLASSSUBPROD2)))){
+                glassPublication = false;
+            }
+
+                    
+            //Line Split
+            isLinesplit = false;
+            integer countFreeTerm = 0;
+            integer countPartialTerm = 0;
+            for (Promotions__c promProd : promotions){
+                promoType = promProd.Promo_Type__c;
+                isApplicableToAllProducts = promprod.Applicable_to_All_Products__c;
+                promoProducts = promProd.Promo_Products1__r;
+                if ((OL.PricebookEntry.Product2.Item_Category__c == LICENSETERM)|| (OL.PricebookEntry.Product2.Item_Category__c == PUBLICATIONTERM)){
+                  if ((promoType == FREETERM) || (promoType == PARTIALTERM)){
+                      if (promoType == FREETERM){
+                          isApplicableToAllProducts = true; //Free term is always Applicable to all Products
+                          countFreeTerm++;
+                          isFreeTerm = true;
+                      }
+                      if (promoType == PARTIALTERM){
+                          countPartialTerm++;
+                          isPartialTerm = true;
+                      }
+                      if (isApplicableToAllProducts == true){
+                          isLinesplit = true;
+                          promoMonths = integer.valueOf(promProd.Free_Term_Quantity__c);
+                      } else{                     
+                          for (Promo_Products__c prods : promoProducts){
+                              if(prods.Product_Code__r.NS_Internal_ID__c == productInternalId){
+                                  isLinesplit = true;
+                              }
+                          }
+                      }
+                  }
+                }
+        if (promoType=='Trial'){ 
+          isTrial = true;
+        }
+            }
+                     
+            //Do not generate Sales Order if there are multiple free/partial term promos
+            if(countFreeTerm + countPartialTerm > 1){
+                     AddMessages(MULTIPLEPROMOS);
+                     return false;
+            }
+            countFreeTerm = 0;
+            countPartialTerm = 0;
+            maxEndDate = contractEndDate;
+            return true;
+           
+        }//End method InitializeSOItemValues
+        
+        public void AddSplitSOLines(OpportunityLineItem OL){
+  
+            //Line1
+            soLineStartDate1 = soStartDate;
+            soLineTerm1 = promoMonths;
+            soLineEndDate1 = soStartDate.addMonths(promoMonths).addDays(-1);
+            excludeRenewal1 = true;
+            if (isFreeTerm == true){
+                billingScheduleforLine1 = null;
+                listPrice1 = 0;
+            }else {
+                listPrice1 = listPrice;
+                //string billSchedule1 = MONTHLY + promoMonths + '__c';
+                //billingScheduleforLine1 =(string)SFNSBillingSchedule.get(billSchedule1);
+                billingScheduleforLine1 = getBillSchedule(payTerm, promoMonths);
+                
+            }
+            //Line2
+            soLineStartDate2 =soLineEndDate1.addDays(1) ;
+            soLineEndDate2 = soEndDate.addMonths(promoMonths).addDays(-1);
+            excludeRenewal2 = false;
+            listPrice2 = listPrice;
+            if(isFreeTerm = true){
+                soLineTerm2 = conTerm.intValue(); //Line 2 term
+                billingScheduleforLine2 = billingScheduleforLine;
+            } else if (isPartialTerm == true){
+                soLineTerm2 = conTerm.intValue()- promoMonths;
+                //string billSchedule2 = MONTHLY + soLineTerm2 + '__c';
+                //billingScheduleforLine2 =(string)SFNSBillingSchedule.get(billSchedule2);
+                billingScheduleforLine2 = getBillSchedule(payTerm, soLineTerm2);
+            }
+    
+            //End date for SO Line cannot be more than Contract end date
+            if(maxEndDate.date() < soLineEndDate2.date()){
+                maxEndDate = soLineEndDate2;
+            }
+            if (!((OL.PricebookEntry.Product2.Item_Category__c == LICENSETERM)||(OL.PricebookEntry.Product2.Item_Category__c == LICENSEPERPETUAL)
+            ||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATIONTERM)||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATION)
+            ||(OL.PricebookEntry.Product2.Item_Category__c == HARDWARE))){
+            soLineStartDate1 = null;
+            soLineStartDate2 = null;
+            }
+            if (!((OL.PricebookEntry.Product2.Item_Category__c == LICENSETERM)||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATIONTERM)||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATION))){
+            soLineTerm1 = null;
+            soLineEndDate1 = null;
+            soLineTerm2 = null; 
+            soLineEndDate2 = null;  
+            }
+             
+    
+            // Add Split Lines to The Sales Order Line items
+            //Line1
+            newSOLines.add(new Sales_Order_Item__c(
+                            item__c = productInternalId, 
+                            Product__c = productId,
+                            quantity__c = qty,
+                            //custcol_mi_media_quantity__c = mediaQty,
+                            price__c = priceLevel,
+                            custcol_mi_list_price__c = listPrice1,
+                            custcol_mi_inline_discount__c = discount,
+                            custcol_mi_sfdc_order_type__c = orderType,
+                            custcol_mi_exclude_from_contract__c = excludeRenewal1,
+                            custcol_mi_contract_line_start_date__c = soLineStartDate1,
+                            custcol_mi_contract_term_months__c = soLineTerm1,
+                            custcol_mi_contract_line_end_date__c = soLineEndDate1,
+                            billingSchedule__c = billingScheduleforLine1,
+                            custcol_mi_sf_pricebook_id__c = packageCode,
+                            Description__c = description,
+                            Operation__c = INSERTOPERATION,
+                            custcol_sf_opp_product_id__c = OL.Id,
+                            m_Sales_Order__c = newSO.Id));
+           //Line2
+           newSOLines.add(new Sales_Order_Item__c(
+                            item__c = productInternalId, 
+                            Product__c = productId,
+                            quantity__c = qty,
+                            //custcol_mi_media_quantity__c = mediaQty,
+                            price__c = priceLevel,
+                            custcol_mi_list_price__c = listPrice2,
+                            custcol_mi_inline_discount__c = discount,
+                            custcol_mi_sfdc_order_type__c = orderType,
+                            custcol_mi_exclude_from_contract__c = excludeRenewal2,
+                            custcol_mi_contract_line_start_date__c = soLineStartDate2,
+                            custcol_mi_contract_term_months__c = soLineTerm2,
+                            custcol_mi_contract_line_end_date__c = soLineEndDate2,
+                            billingSchedule__c = billingScheduleforLine2,
+                            custcol_mi_sf_pricebook_id__c = packageCode,
+                            Description__c = description,
+                            Operation__c = INSERTOPERATION,
+                            custcol_sf_opp_product_id__c = OL.Id,
+                            m_Sales_Order__c = newSO.Id));
+        }//End method AddSplitSOLines
+        
+        public void AddNoSplitSOLines(OpportunityLineItem OL){
+            soLineStartDate = soStartDate;
+            soLineTerm = conTerm.intValue();
+            soLineEndDate = soStartDate.addMonths(conTerm.intValue()).addDays(-1) ;
+            excludeRenewal = false; 
+            if (!((OL.PricebookEntry.Product2.Item_Category__c == LICENSETERM)||(OL.PricebookEntry.Product2.Item_Category__c == LICENSEPERPETUAL)
+            ||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATIONTERM)||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATION)
+            ||(OL.PricebookEntry.Product2.Item_Category__c == HARDWARE))){
+                soLineStartDate = null;
+            }
+            if (!((OL.PricebookEntry.Product2.Item_Category__c == LICENSETERM)||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATIONTERM)||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATION))){
+                soLineTerm = null;
+                soLineEndDate = null; 
+            }
+/*                if (!((OL.PricebookEntry.Product2.Item_Category__c == LICENSETERM)||(OL.PricebookEntry.Product2.Item_Category__c == PUBLICATIONTERM))){
+                soLineStartDate = null;
+                soLineTerm = null;
+                soLineEndDate = null;
+            }
+       */
+            newSOLines.add(new Sales_Order_Item__c(
+                            item__c = productInternalId, 
+                            Product__c = productId,
+                            quantity__c = qty,
+                            //custcol_mi_media_quantity__c = mediaQty,
+                            price__c = priceLevel,
+                            custcol_mi_list_price__c = listPrice,
+                            custcol_mi_inline_discount__c = discount,
+                            custcol_mi_sfdc_order_type__c = orderType,
+                            custcol_mi_exclude_from_contract__c = excludeRenewal,
+                            custcol_mi_contract_line_start_date__c = soLineStartDate,
+                            custcol_mi_contract_term_months__c = soLineTerm,
+                            custcol_mi_contract_line_end_date__c = soLineEndDate,
+                            billingSchedule__c = billingScheduleforLine,
+                            custcol_mi_sf_pricebook_id__c = packageCode,
+                            Description__c = description,
+                            Operation__c = INSERTOPERATION,
+                            custcol_sf_opp_product_id__c = OL.Id,
+                            m_Sales_Order__c = newSO.Id));
+        
+        }//End method AddNoSplitSOLines
+        
+        public void AddProdRelSOLines(OpportunityLineItem OL){
+          If (isLinesplit == true){ 
+            soLineStartDate = soLineStartDate2;
+            soLineTerm = soLineTerm2;
+            soLineEndDate = soLineEndDate2;
+          } /*else {
+            soLineStartDate = null;
+            soLineTerm = null;
+            soLineEndDate = null;
+          } */
+    datetime soLineRelStartDate = soLineStartDate;
+    datetime soLineRelEndDate = soLineEndDate;
+    integer soLineRelTerm = soLineTerm;
+        for (m_Product_Relationship__c rel : prodRel){
+            soLineRelStartDate = soLineStartDate;
+         soLineRelEndDate = soLineEndDate;
+         soLineRelTerm = soLineTerm;
+         billingScheduleforRelLine = billingScheduleforLine;
+          if ((rel.Product_Code__c == OL.PricebookEntry.Product2.id)&& ( ((OL.Parent_Product__c==null) && ((rel.Relation_Type__c =='Shipping Fee')||(rel.Relation_Type__c == 'Processing Fee')))||(rel.Relation_Type__c =='Order Processing Instructions'))) {
+          shippingProducts.add(new Product2(Id = rel.Related_Product_Code__c, NS_Internal_ID__c = rel.Related_Product_Code__r.NS_Internal_ID__c));
+          if (!((rel.Related_Product_Code__r.Item_Category__c == LICENSETERM)
+      ||(rel.Related_Product_Code__r.Item_Category__c == LICENSEPERPETUAL)
+            ||(rel.Related_Product_Code__r.Item_Category__c == PUBLICATIONTERM)
+      ||(rel.Related_Product_Code__r.Item_Category__c == PUBLICATION)
+            ||(rel.Related_Product_Code__r.Item_Category__c == HARDWARE))){
+            soLineRelStartDate = null;
+            }
+            if (!((rel.Related_Product_Code__r.Item_Category__c == LICENSETERM)
+      ||(rel.Related_Product_Code__r.Item_Category__c == PUBLICATIONTERM)
+      ||(rel.Related_Product_Code__r.Item_Category__c == PUBLICATION))){
+            soLineRelTerm = null;
+            soLineRelEndDate = null;
+            }  
+            if(!((rel.Related_Product_Code__r.Item_Category__c == LICENSETERM)||
+                (rel.Related_Product_Code__r.Item_Category__c == PUBLICATIONTERM))){
+                  billingScheduleforRelLine = null;
+            }        
+          newSOLines.add(new Sales_Order_Item__c(
+                          item__c = rel.Related_Product_Code__r.NS_Internal_ID__c,
+                          Product__c =  rel.Related_Product_Code__c,
+                          quantity__c = qty,
+                          custcol_mi_exclude_from_contract__c = excludeRenewal,
+                          custcol_mi_contract_line_start_date__c = soLineRelStartDate,
+                          custcol_mi_contract_term_months__c = soLineRelTerm,
+                          custcol_mi_contract_line_end_date__c = soLineRelEndDate,
+                          billingSchedule__c = billingScheduleforRelLine,
+                          Description__c = rel.Related_Product_Code__r.Name,
+                          Operation__c = INSERTOPERATION,
+                          m_Sales_Order__c = newSO.Id));
+        }
+            }
+        }//End method AddProdRelSOLines
+ 
+    public void AddRushShipSOLines(){
+        
+        oppProductid.clear();
+   
+        oppProductid.add(getShipProdInternalId(newSO.shipMethod__c));
+        
+        Product2[] prod = [Select p.Id, p.ProductCode, p.Name, p.NS_Internal_ID__c, p.IsActive From Product2 p  where p.IsActive = true  and p.ProductCode in :oppProductid];
+                 
+        for (Product2 prodShip : prod){
+            shippingProducts.add(new Product2(Id = prodShip.Id, NS_Internal_ID__c = prodShip.NS_Internal_ID__c));
+            newSOLines.add(new Sales_Order_Item__c( item__c = prodShip.NS_Internal_ID__c,
+                                                    Product__c = prodShip.Id,
+                                                    quantity__c = 1,
+                                                    custcol_mi_exclude_from_contract__c = true,
+                                                    billingSchedule__c = null,
+                                                    Description__c = prodShip.Name,
+                                                    Operation__c = INSERTOPERATION,
+                                                    m_Sales_Order__c = newSO.Id));
+        }
+    }//End method AddRushShipSOLines
+    
+    public void AddMigrationBusinessSOLine(){
+        If ((opp.type == MIGRATION)&&(opp.Migration_Credits__c != null)){
+      soLineterm = (date.valueof(soStartDate)).monthsBetween((date.valueof(opp.Migration_Credits_Applicable_till__c)).addDays(1)); // when checking months between make sure to add one day to the end date to get correct months
+            integer listPrice1 = -(opp.Migration_Credits__c).intValue() * soLineterm;
+      if (soLineterm > 0){
+                    //soLineEndDate = soLineStartDate.addMonths(soLineterm);
+                    //billSchedule = MONTHLY + soLineTerm + '__c';
+                    //billingScheduleforLine =(string)SFNSBillingSchedule.get(billSchedule);
+                    billingScheduleforLine = getBillSchedule(payTerm, soLineTerm);
+                    
+                    newSOLines.add(new Sales_Order_Item__c(
+                                    item__c = SFNSIntegration.Migration_Credit_Code__c,
+                                    product__c = SFNSIntegration.Migration_Credit_Product_Id__c,
+                                    quantity__c = 1,
+                                    price__c = priceLevel,
+                                    custcol_mi_list_price__c = listPrice1,
+                                    custcol_mi_sfdc_order_type__c = orderType,
+                                    custcol_mi_exclude_from_contract__c = true,
+                                    //custcol_mi_contract_line_start_date__c = soLineStartDate,
+                                    //custcol_mi_contract_term_months__c = soLineTerm,
+                                    //custcol_mi_contract_line_end_date__c = soLineEndDate,
+                                    billingSchedule__c = billingScheduleforLine,
+                                    Description__c = 'Migration Credits',
+                                    Operation__c = INSERTOPERATION,
+                                    m_Sales_Order__c = newSO.Id));
+            }
+        } 
+    }//End method AddMigrationBusinessSOLine 
+    
+    public void InsertSalesOrderLines(){
+        newSOLines = newSO.m_Sales_Order_Item__r;
+        RelatedProductInfo();
+        for (OpportunityLineItem OLItem : oppProducts) {
+            if (InitializeSOItemValues(OLItem)==true){
+                if (OLItem.PricebookEntry.Product2.Is_Package__c != true) {  
+                //Insert Sales Order Line Items only if the Product is not a Package
+                    if(isLinesplit == true){
+                        AddSplitSOLines(OLItem);
+                    }else {
+                        AddNoSplitSOLines(OLItem);
+                    }
+          if (!(isTrial)){
+            AddProdRelSOLines(OLItem);
+          }
+                } 
+      }
+        }
+    AddRushShipSOLines(); 
+    AddMigrationBusinessSOLine();
+          
+        insert newSOLines;
+    }//End method InsertSalesOrderLines
+    
+    public void UpdateSalesOrderLines(){
+        date currentDate = date.today();
+        shippingPriceSchedule = [Select m.product__c, m.Price__c, m.Payment_Type__c,Price_Type__c  From m_Product_Price_Schedule__c m where m.product__c in :shippingProducts and m.Region__c = :accountRegion and m.license_unit__c='Each' and m.Price_Type__c in ('Flat','Linear') and status__c='Active' and start_date__c<= :currentDate and end_date__c>= :currentDate];
+        string paymentType;
+        decimal price;
+        boolean hasPriceSchedule = false;
+        
+        for (Sales_Order_Item__c soLine : newSOLines){
+              soLine.custcol_sf_so_product_id__c = soLine.Id;
+            //Update list price for shipping lines
+            for (Product2 shippingprod : shippingProducts){
+                if (shippingprod.NS_Internal_ID__c == soLine.item__c){
+                    for (m_Product_Price_Schedule__c priceSched : shippingPriceSchedule){
+                        if(shippingprod.id == priceSched.Product__c){
+                            price = priceSched.Price__c;
+                            if(priceSched.Price_Type__c == 'Flat'){
+                              soLine.quantity__c = 1;
+                            }
+                            paymentType = priceSched.Payment_Type__c ;
+                            soLine.custcol_mi_list_price__c = price;
+                            hasPriceSchedule = true;
+                            if (paymentType <> RECURRING){
+                                  soLine.billingSchedule__c = null;
+                            }
+                        }
+                }
+                if (hasPriceSchedule == false){
+                    soLine.billingSchedule__c = null;
+                }
+                hasPriceSchedule = false;
+            }
+            
+            }
+        }
+        update newSOLines;
+    }//End method UpdateSalesOrderLines
+    
+    public void UpdateSalesOrder(){
+        if (isFreeTerm == true){ 
+             contractTerm = contractTerm + promoMonths;//Contract term on So Header
+             newSo.custbody_mi_contract_term__c = contractTerm;
+             soNewStartDate = soStartDate.addMonths(promoMonths);
+             newSo.startDate__c = soNewStartDate;
+             updateSo = true; 
+        }
+        // If Item Category for any line item is 'Publication' or 'Publication - Term' then the contract type on Sales Order becomes 'Publication'
+        //Otherwise it is 'EULA'
+        if (contractType == CONTRACTTYPEPUBLICATION){
+            newSO.custbody_mi_contract_type__c = CONTRACTTYPEPUBLICATION;//Publication
+            newSo.custbody_mi_renewal_type__c = RENEWSWITHQUOTE;//Renews with Quote
+            if (glassPublication == true){
+              newSo.custbody_mi_renewal_type__c = RENEWTYPE4;//Non Renewing
+            }
+            updateSo = true;
+        }
+        if (maxEndDate.date() > contractEndDate.date()){
+            newSO.custbody_mi_contract_end_date__c = maxEndDate;
+            newSO.endDate__c = maxEndDate;
+            updateSo = true;
+            }
+            newSO.custbody_sf_so_id__c = newSO.id;
+        //if(updateSo == true){
+            update newSo;
+       // }
+    }//End method UpdateSalesOrder
+    
+    public void InsertSalesTeam(){
+        newSalesTeam = newSO.Sales_Order_Teams__r;
+            if (employeeNumber != null){
+            newSalesTeam.add(new Sales_Order_Team__c(
+                employee__c = employeeNumber, 
+                salesRole__c = salesRole,
+                isPrimary__c = ispPrimary,
+                contribution__c = contribution,
+                m_Sales_Order_Team__c = newSO.Id ));
+            }
+            insert newSalesTeam;
+    
+    }//End method InsertSalesTeam
+    
+    public void InsertNetSuiteSalesOrder(){
+             
+            CommonObj.NetSuiteSalesOrder op=new CommonObj.NetSuiteSalesOrder();
+            op.details=newSO;
+            op.soItem=newSOLines;
+            op.soTeamItem=newSalesTeam;
+             
+            try{
+            system.debug(op);   
+                cLib.insertSalesOrderDetails(op.clone());
+            }catch(CommonException cEx2){
+                cEx2.notifyViaEmail(CommonObj.developerEmails);
+                insert new NS_SF_Integration_Error__c(Sales_Order__c = newSO.Id, Error_Code__c = cEx2.cExceptionType + ' Opportunity Id: '+newSO.custbody_sf_opp_id__c, Error_Message__c= cEx2.developerAnnotation);
+                AddMessages(NETSUITESONOTINSERTED);
+            }
+    
+    }//End method InsertNetSuiteSalesOrder
+    
+    public void AddMessages(string message){
+                ApexPages.Message myMsg = new ApexPages.Message(ApexPages.Severity.INFO,message);
+                ApexPages.addMessage(myMsg);
+    }//End method AddMessages
+
+    @isTest(SeeAllData=true) 
+    static void test(){
+        string stropid;
+        PageReference pageRef = Page.SalesOrder; 
+        Test.setCurrentPage(pageRef);
+        
+        CreateSalesOrder SOrder = new CreateSalesOrder();
+       List<opportunity> TestOpportunitiesList=new List<opportunity>();
+     List<opportunity> TestOpportunitiesList1=new List<opportunity>();
+        List<Product2> TestProductsList=new List<Product2>();
+       
+       //Testing Validatons
+       Account TestBillToAccount = new Account(name = 'Test Bill-To Account', billingState = 'CA');
+       insert TestBillToAccount;
+       Account TestShipToAccount = new Account(name = 'Test Ship-To Account', billingState = 'CA');
+      // insert TestShipToAccount; 
+       Opportunity TestOpp = new Opportunity(name = 'Test Opportunity', bill_to_account__c = TestBillToAccount.id, stageName='Discovery',Closedate=Date.Today());
+       TestOpportunitiesList.add(TestOpp);
+
+       Account TestBillToAccount1 = new Account(name = 'Test Bill-To Account1', billingState = 'CA', Credit_Hold_Type__c = 'Okay To Ship', NS_Internal_ID__c = '567567');
+       insert TestBillToAccount1;
+       system.debug('CREDIT HOLD TYPE: '+ TestBillToAccount1.Credit_Hold_Type__c);
+       Account TestShipToAccount1 = new Account(name = 'Test Ship-To Account1', billingState = 'CA', Credit_Hold_Type__c = 'Okay To Ship', NS_Internal_ID__c = '56737');
+      // insert TestShipToAccount1; 
+       Opportunity TestOpp1 = new Opportunity(name = 'Test Opportunity1', bill_to_account__c = TestBillToAccount1.id,AccountId = TestBillToAccount1.id, stageName='Discovery', Order_Status__c ='2-Submitted - Order',Contract_Term__c = 36, Closedate=Date.Today(),  type= 'Migration Business', Migration_Credits__c = 250, Migration_Credits_Applicable_till__c = Date.Today().addMonths(48),RUSH_Order__c = true, Preferred_Shipping_Method__c = 'FedEx 2Day');
+       Opportunity TestOpp2 = new Opportunity(name = 'Test Opportunity2', bill_to_account__c = TestBillToAccount1.id,AccountId = TestBillToAccount1.id, stageName='Discovery', Order_Status__c ='2-Submitted - Order',Contract_Term__c = 36, Closedate=Date.Today(),  type= 'Migration Business', Migration_Credits__c = 250, Migration_Credits_Applicable_till__c = Date.Today().addMonths(48),RUSH_Order__c = true, Preferred_Shipping_Method__c = 'FedEx 2Day');
+       TestOpportunitiesList.add(TestOpp1);
+     TestOpportunitiesList.add(TestOpp2);
+       insert TestOpportunitiesList;
+       Product2 TestProd1 = new Product2(name='Test Product1',
+                                        Single_User_Licensing__c = false,
+                                        ProductCode = 'PRDCODE',
+                                        NS_Internal_ID__c = 'SirishTest1InternalId',
+                                        Item_Category__c = 'Publication - Term', 
+                                        Is_Package__c = false,
+                                        Provisioning_Required__c = true);
+       Product2 TestProd2 = new Product2(name='Test Product2',
+                                        Single_User_Licensing__c = true,
+                                        ProductCode = 'PRDCODE2',
+                                        NS_Internal_ID__c = 'SirishTest2InternalId',
+                                        Item_Category__c = 'Publication', 
+                                        Is_Package__c = false);
+       Product2 TestProd3 = new Product2(name='Test Product3',
+                                        Single_User_Licensing__c = false,
+                                        ProductCode = 'ABCD',
+                                        NS_Internal_ID__c = 'SirishTest3InternalId',
+                                        Item_Category__c = 'License - Term', 
+                                        Is_Package__c = false);
+  /*   Product2 TestProd3 = new Product2(name='Test Product4',
+                                        Single_User_Licensing__c = false,
+                                        ProductCode = 'ABhjhgD',
+                                        NS_Internal_ID__c = '12364',
+                                        //Item_Category__c = 'License - Term', 
+                                        Is_Package__c = true); 
+                                        */
+       TestProductsList.add(TestProd1);                         
+       TestProductsList.add(TestProd2);                         
+       TestProductsList.add(TestProd3);                         
+     //  TestProductsList.add(TestProd4);                         
+                                         
+       insert TestProductsList;  
+              
+       PricebookEntry pbookid = [select Pricebook2Id from PricebookEntry limit 1];
+       PricebookEntry PBook1 = new PricebookEntry(Product2Id = TestProd1.id,UnitPrice = 1000, Pricebook2Id = pbookid.Pricebook2Id, IsActive = true);
+       PricebookEntry PBook2 = new PricebookEntry(Product2Id = TestProd2.id,UnitPrice = 1500, Pricebook2Id = pbookid.Pricebook2Id, IsActive = true);
+       insert PBook1;
+       insert PBook2;
+       OpportunityLineItem[] Testoplines = new OpportunityLineItem[]{};
+       
+       OpportunityLineItem TestOpLine1 = new OpportunityLineItem(PricebookEntryId = PBook1.id, 
+                                                                 OpportunityId = TestOpp1.id, 
+                                                                 UnitPrice = 250,
+                                                                 Quantity = 3, 
+                                                                 Terms_in_Months__c = 36,
+                                                                 Downpayment_Product_ID__c = null, 
+                                                                 m_Finance_Charge__c = true, 
+                                                                 Order_Type__c = 'New', 
+                                                                 Parent_Product__c = TestProd2.id, 
+                                                                 //Bundling_Price_after_Discount__c = 0, 
+                                                                 m_Payment_Recurring__c = 0, 
+                                                                 m_Payment_Upfront__c = 0, 
+                                                                 m_Licence_Quantity__c = 3);
+        OpportunityLineItem TestOpLine2 = new OpportunityLineItem(PricebookEntryId = PBook2.id, 
+                                                                 OpportunityId = TestOpp1.id, 
+                                                                 UnitPrice = 125,
+                                                                 Quantity = 5, 
+                                                                 Terms_in_Months__c = 36,
+                                                                 Downpayment_Product_ID__c = '6786bhkh7897900', 
+                                                                 m_Finance_Charge__c = false, 
+                                                                 //Order_Type__c = 'New', 
+                                                                 //Parent_Product__c = TestProd2.id, 
+                                                                 //Bundling_Price_after_Discount__c = 0, 
+                                                                 m_Payment_Recurring__c = 1500, 
+                                                                 m_Payment_Upfront__c = 0, 
+                                                                 m_Licence_Quantity__c = 3);                                                             
+                                                                           
+       OpportunityLineItem TestOpLine3 = new OpportunityLineItem(PricebookEntryId = PBook1.id, 
+                                                                 OpportunityId = TestOpp2.id, 
+                                                                 UnitPrice = 250,
+                                                                 Quantity = 3, 
+                                                                 Terms_in_Months__c = 36,
+                                                                 Downpayment_Product_ID__c = null, 
+                                                                 m_Finance_Charge__c = false, 
+                                                                 Order_Type__c = 'New', 
+                                                                 Parent_Product__c = TestProd2.id, 
+                                                                 //Bundling_Price_after_Discount__c = 0, 
+                                                                 m_Payment_Recurring__c = 0, 
+                                                                 m_Payment_Upfront__c = 0, 
+                                                                 m_Licence_Quantity__c = 3);
+        OpportunityLineItem TestOpLine4 = new OpportunityLineItem(PricebookEntryId = PBook2.id, 
+                                                                 OpportunityId = TestOpp2.id, 
+                                                                 UnitPrice = 125,
+                                                                 Quantity = 5, 
+                                                                 Terms_in_Months__c = 36,
+                                                                 Downpayment_Product_ID__c = null, 
+                                                                 m_Finance_Charge__c = false, 
+                                                                 Order_Type__c = 'New', 
+                                                                 //Parent_Product__c = TestProd2.id, 
+                                                                 //Bundling_Price_after_Discount__c = 0, 
+                                                                 m_Payment_Recurring__c = 0, 
+                                                                 m_Payment_Upfront__c = 0, 
+                                                                 m_Licence_Quantity__c = 3);                                            
+                                       
+                                       
+                                       
+       Testoplines.add(TestOpLine1);
+       Testoplines.add(TestOpLine2);
+     Testoplines.add(TestOpLine3);
+       Testoplines.add(TestOpLine4);
+     
+       insert Testoplines;
+       
+       Promotions__c TestPromo = new Promotions__c(Promo_Type__c = 'Partial Term Discount', 
+                                                    Promo_Code__c = 'TESTPromo1',
+                                                    Promo_Category__c = 'Standard',
+                                                    Free_Term_Quantity__c = '3',
+                                                    Applicable_to_All_Products__c = false);
+       insert TestPromo;                                            
+       
+       Promo_Products__c TestPromoProducts = new Promo_Products__c(Product_Code__c = TestProd1.id, Promocode__c = TestPromo.id);
+       insert TestPromoProducts;
+       
+       Opportunity_Promo__c TestOpp1Promo = new Opportunity_Promo__c(Opportunity__c = TestOpp1.id, Promotion_Discount_Charge__c = TestPromo.id);
+       insert TestOpp1Promo;
+       
+       m_Product_Relationship__c TestProdRel = new m_Product_Relationship__c(Product_Code__c = TestProd1.id,
+                                                                             Relation_Type__c = 'Shipping Fee',
+                                                                             Related_Product_Code__c = TestProd3.id);
+
+       insert TestProdRel;
+        
+       TestOpp1.StageName = 'Closed Won';
+     TestOpp2.StageName = 'Closed Won';
+     TestOpportunitiesList1.add(TestOpp1);
+     TestOpportunitiesList1.add(TestOpp2);
+     update TestOpportunitiesList1;
+       TestOpportunitiesList.add(TestOpp1); 
+     
+ /*    ServiceContract S = new ServiceContract(Name = 'TestServiceContract',
+                                               AccountId = TestBillToAccount.id,
+                                               StartDate = date.today(),
+                                               EndDate = date.today().addmonths(36));
+       insert S; 
+     
+       Opportunity TestOpp3 = new Opportunity(name = 'Test Opportunity3', bill_to_account__c = TestBillToAccount1.id,AccountId = TestShipToAccount1.id, stageName='Discovery', Order_Status__c ='2-Submitted - Order',Contract_Term__c = 36, Closedate=Date.Today(), Is_Co_Term__c = true,Co_Term_Service_Contract__c = S.id);
+       insert TestOpp3;
+       TestOpp3.StageName = 'Closed Won';
+       update TestOpp3;
+       TestOpportunitiesList.add(TestOpp3);
+    */    
+       For (Opportunity op: TestOpportunitiesList)  {
+        ApexPages.currentPage().getParameters().put('oppID', op.Id);
+        stropid = op.id;
+        SOrder.GenerateOrder(stropid);
+       }
+       PageReference Pref = SOrder.SubmitOrder();
+       Pref =  SOrder.ReturnToOpportunity();    
+       
+        ApexPages.StandardController stdController = new ApexPages.StandardController(TestOpp1);
+        // ApexPages.currentPage().getParameters().put('oppID', op.Id);
+        CreateSalesOrder CSO = new CreateSalesOrder(stdController);
+    }
+}

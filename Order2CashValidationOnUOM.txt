@@ -1,0 +1,88 @@
+/*****************************
+Author: Anupam Priyadarshi
+Title: Trigger for Validations on UOM
+Description: Trigger for Validating Unit of Measures after insert and before delete
+Ref#: 
+Open Issues (remove when resolved): N/A
+See test Method.
+Revision History: 
+03/08/2013 - Created
+*********************************/
+
+trigger Order2CashValidationOnUOM on m_Product_UOM__c (after insert, before delete) {
+  set<Id> productIds = new set<Id>();
+  if (trigger.isDelete){
+    for(m_Product_UOM__c uom:trigger.old){
+      productIds.add(uom.product_code__c);
+  } 
+  }else if (trigger.isInsert){
+    for(m_Product_UOM__c uom:trigger.new){
+      productIds.add(uom.product_code__c);        
+    }    
+  }
+  
+  //set<Id> productUOMIDs = trigger.oldMap.keySet();
+  map<string, map<string, m_Product_UOM__c>> productUOMs = new map<string, map<string, m_Product_UOM__c>> ();  
+  for(m_Product_UOM__c ps: [select id, Product_Code__c, m_LU_UOM__c, m_Term_Unit__c from m_Product_UOM__c where Product_Code__c IN :productIds]){
+      if(!productUOMs.containsKey(ps.Product_Code__c)){
+        productUOMs.put(ps.Product_Code__c,new map<string, m_Product_UOM__c>());  
+      }
+      map<string,m_Product_UOM__c> uom = productUOMs.get(ps.Product_Code__c);
+      uom.put(ps.id,ps);
+      productUOMs.put(ps.Product_Code__c, uom);
+    }
+    
+    map<string, map<string, m_Product_Price_Schedule__c>> priceSchedules = new map<string, map<string, m_Product_Price_Schedule__c>>();
+  for(m_Product_Price_Schedule__c ps:[SELECT Id, Product__c, Status__c, Start_Date__c, End_Date__c, Region__c, Account_ID__c,License_Unit__c 
+                               FROM m_Product_Price_Schedule__c
+                                WHERE product__c IN :productIds and Status__c='Active']){
+    if(!priceSchedules.containsKey(ps.Product__c)){
+             priceSchedules.put(ps.Product__c,new map<string, m_Product_Price_Schedule__c>());
+         }                       
+      map<string, m_Product_Price_Schedule__c> mp = priceSchedules.get(ps.Product__c);
+      mp.put(ps.Id,ps);
+      priceSchedules.put(ps.Product__c,mp);                            
+    }
+    
+    /*set<Id> allUOMIds = new set<Id>();
+    for(m_Product_UOM__c ps: [select id, Product_Code__c, m_LU_UOM__c, m_Term_Unit__c from m_Product_UOM__c where Product_Code__c IN :productIds]){
+      allUOMIds.add(ps.id);
+    }*/       
+
+  list<Product2> prodlist = new list<Product2>();
+    if (trigger.isDelete){
+      for(m_Product_UOM__c uom:Trigger.old){
+          if (productUOMs.keySet().size()==1){
+            product2 pr = new Product2(Id=uom.product_code__c);
+            pr.isActive=false;
+            prodlist.add(pr);            
+        }    
+    }        
+    }
+    else if(trigger.isInsert){
+      for(m_Product_UOM__c uom:Trigger.new){
+          for(m_Product_UOM__c puom:productUOMs.get(uom.Product_Code__c).values()){
+                  boolean isPriceSchedule = false; 
+                  if (priceSchedules.containsKey(uom.Product_Code__c)){
+                    for(m_Product_Price_Schedule__c psd:priceSchedules.get(uom.Product_Code__c).values()){
+                      if ((puom.m_LU_UOM__c==psd.License_Unit__c)){
+                        isPriceSchedule = true;
+                        break;
+                        
+                      }
+                    }                  
+                  }              
+              if (!isPriceSchedule){
+                product2 prd = new product2(id=uom.Product_Code__c);
+                prd.IsActive = false;
+                prodlist.add(prd);
+              }
+          }                    
+    }
+  }    
+
+  if (prodlist!=null && prodlist.size()>0){
+    update prodlist;
+  }
+
+}

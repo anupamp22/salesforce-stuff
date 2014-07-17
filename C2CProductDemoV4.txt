@@ -1,0 +1,617 @@
+<!-- 
+/*
+ * Author: Chia Chang
+ * Developer: Chia Chang
+ * Title: Product Configurator
+ * Description: Product Configurator SFDC Visualforce Page 
+ * Ref#: 1.5
+ * Open Issues (remove when resolved): N/A
+ * Usage: N/A
+ * API Version: SFDC v24.0
+ * Licensing: Mitchell International.
+ * Revisions' History:
+ * 11.11.2012- Engineering Annotations
+ * 04.17.2013- Consolidate Pick 1/Pick N of M/Pre-Req Any 1
+ */
+-->
+<apex:page controller="C2CExtV4" standardStyleSheets="true"
+	sidebar="false" showHeader="false">
+	<script type="text/javascript"
+		src="{!URLFOR($Resource.mincludes, 'includes/js/jquery-1.7.2.min.js')}"></script>
+	<script type="text/javascript"
+		src="{!URLFOR($Resource.mincludes, 'includes/js/jquery-ui-1.8.20.custom.min.js')}"></script>
+	<script type="text/javascript"
+		src="{!URLFOR($Resource.mincludes, 'includes/js/jquery.easing.1.3.js')}"></script>
+	<script type="text/javascript"
+		src="{!URLFOR($Resource.mincludes, 'includes/js/json2.js')}"></script>
+	<script type="text/javascript"
+		src="{!URLFOR($Resource.mincludes, 'includes/js/jquery.flipCounter.1.2.js')}"></script>
+	<script type="text/javascript"
+		src="{!URLFOR($Resource.mincludes, 'includes/js/dojo/dojo.js')}"></script>
+	<script type="text/javascript"
+		src="{!URLFOR($Resource.mincludes, 'includes/js/jquery.poshytip.js')}"></script>
+	<script src="{!URLFOR($Resource.C2CJSV4)}" type="text/javascript"></script>
+	<link href="{!URLFOR($Resource.C2CCSSV4)}" rel="stylesheet"
+		type="text/css" />
+	<link
+		href="{!URLFOR($Resource.mincludes, 'includes/css/custom-theme/jquery-ui-1.8.20.custom.css')}"
+		rel="stylesheet" type="text/css" />
+	<link
+		href="{!URLFOR($Resource.mincludes, 'includes/css/custom-theme/tip-darkgray/tip-darkgray.css')}"
+		rel="stylesheet" type="text/css" />
+	<script type="text/javascript">
+		app.sfdcAPISessionId='{!$Api.Session_ID}';
+		//Launching miCon Mobile
+		if(/Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent) ) {
+			window.location.replace("miConMobile?oppID=" + app.getURLStr('oppID'));
+		}
+	</script>
+
+	<div id="formBlock">
+		<img alt="Loading..."
+			src="{!URLFOR($Resource.mincludes, 'includes/img/arrows64.gif')}" />
+	</div>
+	<div id="formCalculationBlock"></div>
+	<div id="nsBlock"></div>
+	<div class="pageBlock" id="nsPageBlock">
+		<div class="top-line">
+			<div class="panelHeader">
+				<h2>
+					NetSuite Automation PoC<a
+						style="float: right; font-size: 10px; font-weight: normal; text-decoration: none;"
+						href="javascript:void(0);"
+						onclick="app.nsBlockObj().hide();app.nsPageObj().hide();$j('#nsRpsTable').children().remove();$j('#nsRpsTable').hide();">[
+						x ]</a>&nbsp;&nbsp;&nbsp;
+				</h2>
+			</div>
+		</div>
+		<div class="panelContent" id="nsPageContent">
+			<table border="0" cellpadding="5" cellspacing="0">
+				<tr>
+					<td>customForm</td>
+					<td><input id="inputCustomForm" type="text"
+						placeholder="customForm" value="139" /></td>
+				</tr>
+				<tr>
+					<td>entity</td>
+					<td><input id="inputEntity" type="text" placeholder="entity"
+						value="94644" /></td>
+				</tr>
+				<tr>
+					<td>tranDate</td>
+					<td><input id="inputTranDate" type="text"
+						placeholder="tranDate" value="13/6/2013" /></td>
+				</tr>
+				<tr>
+					<td>orderStatus</td>
+					<td><input id="inputOrderStatus" type="text"
+						placeholder="orderStatus" value="_pendingApproval" /></td>
+				</tr>
+				<tr>
+					<td>salesEffectiveDate</td>
+					<td><input id="inputSalesEffectiveDate" type="text"
+						placeholder="salesEffectiveDate" value="3/6/2013" /></td>
+				</tr>
+				<tr>
+					<td>excludeCommission</td>
+					<td><input id="inputExcludeCommission" type="text"
+						placeholder="excludeCommission" value="false" /></td>
+				</tr>
+				<tr>
+					<td colspan="2">************* Items Begin Here *****************</td>
+				</tr>
+				<tr>
+					<td>item</td>
+					<td><input id="inputItem" type="text" placeholder="item"
+						value="1060" /></td>
+				</tr>
+				<tr>
+					<td>quantity</td>
+					<td><input id="inputQuantity" type="text"
+						placeholder="quantity" value="1" /></td>
+				</tr>
+				<tr>
+					<td>price</td>
+					<td><input id="inputPrice" type="text" placeholder="price"
+						value="-1" /></td>
+				</tr>
+				<tr>
+					<td>rate</td>
+					<td><input id="inputRate" type="text" placeholder="rate"
+						value="150" /></td>
+				</tr>
+			</table>
+			<br /> <br />
+			<table border="0" cellpadding="5" cellspacing="0" id="nsRpsTable"
+				style="display: none;"></table>
+			<br /> <br /> <!-- <input type="button"
+				value=" NetSuite Sales Order:Invoke "
+				onclick="app.netSuiteGenerateSalesOrder('{!$RemoteAction.C2CExtV4.netSuiteCall}');"
+				class="btn" id="nsPoCEntryInvoke" />-->
+		</div>
+	</div>
+	<!-- 
+	<div id="formSearchPadBlock">
+		<img alt="Loading..."
+			src="{!URLFOR($Resource.mincludes, 'includes/img/arrows64.gif')}" />
+	</div>
+	-->
+	<apex:form id="productListForm">
+		<apex:actionFunction action="{!selectBundle}" name="selectBundle"
+			reRender="productListForm"
+			onComplete="init(); app.blockObj().fadeOut(500);">
+			<apex:param name="q" assignTo="{!selectedBundleId}" value="" />
+		</apex:actionFunction>
+		<apex:actionFunction action="{!displayDetails}" name="displayDetails"
+			reRender="productListForm"
+			onComplete="init(); app.blockObj().fadeOut(500);">
+		</apex:actionFunction>
+		<apex:actionFunction action="{!displaySearchDetails}"
+			name="displaySearchDetails"
+			reRender="headerPanel,searchedProductsList"
+			onComplete="init();app.blockObj().fadeOut(500);">
+			<apex:param name="p" assignTo="{!isSearchByKeyword}" value="" />
+		</apex:actionFunction>
+		<apex:actionFunction action="{!addAdditionalProduct}"
+			name="addAdditionalProduct" reRender="productListForm"
+			onComplete="closeSearchPanelAfterAddProduct();">
+		</apex:actionFunction>
+		<apex:actionFunction action="{!updateNumUserContractTermInCart}"
+			name="updateNumUserContractTermInCart" reRender="productListForm"
+			onComplete="init();app.blockObj().fadeOut(500);">
+		</apex:actionFunction>
+		<apex:actionFunction action="{!removeShoppingCartItem}"
+			name="removeShoppingCartItem" reRender="shoppingCart"
+			onComplete="init(); app.blockObj().fadeOut(500);">
+			<apex:param name="r" assignTo="{!selectedProductId}" value="" />
+		</apex:actionFunction>
+		<apex:actionFunction action="{!applyPromotion}" name="applyPromotion"
+			reRender="shoppingCart,headerPanel"
+			onComplete="init(); app.blockObj().fadeOut(500);">
+		</apex:actionFunction>
+		<apex:actionFunction action="{!reCalculate}" name="reCalculatePricing"
+			reRender="productListForm"
+			onComplete="init(); app.blockObj().fadeOut(500);
+						if ('{!customMessages}'!='') app.postCustomMessages('{!JSENCODE(customMessages)}');">
+		</apex:actionFunction>
+		<img alt="Mitchell International"
+			src="{!URLFOR($Resource.mincludes, 'includes/img/micon.jpg')}"
+			style="margin-top: 10px; margin-left: 10px;" />
+		<br />
+		<br />
+		<apex:pageBlock tabStyle="Product2">
+			<apex:outputPanel id="headerPanel">
+				<div class="pageBlock">
+					<div class="top-line">
+						<div class="panelHeader">
+							<h2>Information Center <a href="javascript:void(0);" style="text-decoration:none;" onclick="app.toggleInformationCentre($j('#infoPanelContent'),$j(this));">[+]</a></h2>
+						</div>
+					</div>
+					<div class="panelContent" >
+						<apex:outputPanel rendered="{!if(stage>0,true,false)}">
+							<div id="infoPanelContent" >
+								<table border="0" cellpaddding="2" cellspacing="0">
+									<tr>
+										<td> Opportunity Name:</td>
+										<td><a href="/{!currentOpp.Id}"
+											style="text-decoration: underline;">{!currentOpp.Name}</a></td>
+									</tr>
+									<tr>
+										<td> Account Name:</td>
+										<td><a href="/{!currentOpp.AccountId}"
+											style="text-decoration: underline;">{!currentOpp.Account.Name}</a></td>
+									</tr>
+									<tr>
+										<td> License ({!currentOpp.m_License_Unit__c}):</td>
+										<td><input type="text" size="4" onkeypress="return app.enterKeyReCalculating(this,event,'numUserContractTerm');" maxLength="4" style="text-align: center;" value="{!ROUND(currentOpp.Number_of_Users__c,0)}" placeholder="{!currentOpp.m_License_Unit__c}" id="inputLicense" name="inputLicense"/></td>
+									</tr>
+									<tr>
+										<td> Contract Term (Month):</td>
+										<td><input type="text" size="4" onkeypress="return app.enterKeyReCalculating(this,event,'numUserContractTerm');" maxLength="4" style="text-align:center;" value="{!ROUND(currentOpp.Contract_Term__c,0)}" placeholder="Month" id="inputContractTerm" name="inputContractTerm"/></td>
+									</tr>
+									<tr>
+										<td colspan="2" style="text-align: center;"><font
+											size="1">*The Opportunity will be updated after you
+												complete the configuration.</font></td>
+									</tr>
+								</table>
+								<a href="javascript:void(0);" id="subscribeButton"></a>
+							</div>
+							<div style="width: 60%;">
+								<apex:messages styleClass="errorMsgHeader" id="iMessage" />
+							</div>
+							<div id="datastreamContent"></div>
+						</apex:outputPanel>
+						<apex:outputPanel rendered="{!if(stage==0,true,false)}">
+							<div>Please launch the Configurator from within an
+								Opportunity.</div>
+						</apex:outputPanel>
+					</div>
+				</div>
+			</apex:outputPanel>
+			<div class="pageBlock" id="searchPad">
+				<div class="top-line">
+					<div class="panelHeader">
+						<h2>
+							Add Module(s) <a href="javascript:void(0);" style="text-decoration:none;"
+								onclick="{!if(stage==1,'closeSearchPanelInStep1();','closeSearchPanelInStep3();')}">[x]</a>
+						</h2>
+					</div>
+				</div>
+				<div class="panelContent" id="searchContentPad">
+					<apex:outputPanel id="searchedProductsList"
+						rendered="{!if(stage==3||stage==1,true,false)}">
+						<!--  
+							<apex:inputField id="selectedProductLine"
+								value="{!searchProduct.Product_Line_NS__c}" />&nbsp;&nbsp;
+					        <apex:inputField id="selectedProductFamily"
+								value="{!searchProduct.Sub_Product__c}"
+								onchange="app.blockObj().fadeIn(500);displaySearchDetails('false');" />
+						-->
+				        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+				        <input type="text" value="{!productKeyword}"
+							id="inputProductKeyword" name="inputProductKeyword"
+							placeholder="Enter Product Name"
+							onkeypress="return app.enterKeyTrigger(event);" />
+				        &nbsp;&nbsp;&nbsp;
+				        <input type="button" class="btn" id="btnSearchProduct"
+							value=" Lookup "
+							onclick="app.blockObj().fadeIn(500);displaySearchDetails('true');" />
+						<br />
+						<br />
+						<apex:outputPanel rendered="{!if(ProductListByKeyword.size>0,true,false)}">
+							<a href="javascript:void(0);" class="tsc_buttons2 grey"
+								onclick="app.blockObj().fadeIn(500);app.searchPadObj().slideUp('slow');addAdditionalProduct();">Add
+								Product</a>
+						</apex:outputPanel>
+						<br />
+						<br />
+						<apex:outputPanel rendered="{!if(ProductListByKeyword.size>0,true,false)}">
+							<apex:outputPanel rendered="{!if(ProductListByKeyword.size<26,true,false)}">
+				    			Search results in {!ProductListByKeyword.size} record(s)
+				    		</apex:outputPanel>
+							<br />
+						</apex:outputPanel>
+						<apex:dataTable value="{!ProductListByKeyword}"
+							rendered="{!if(ProductListByKeyword.size>0,true,false)}"
+							var="prod" rowClasses="tableRowOdd,tableRowEven">
+							<apex:column >
+								<apex:facet name="header"></apex:facet>
+								<apex:facet name="footer"></apex:facet>
+								<input type="checkbox" name="{!prod.Id}-search"
+									id="{!prod.Id}-search" value="{!prod.Id}" />
+							</apex:column>
+							<apex:column >
+								<apex:facet name="header">Product Name</apex:facet>
+								<apex:facet name="footer"></apex:facet>
+								<apex:outputText value="{!prod.Name}" />
+							</apex:column>
+							<apex:column >
+								<apex:facet name="header">Product Code</apex:facet>
+								<apex:facet name="footer"></apex:facet>
+								<apex:outputText value="{!prod.ProductCode}" />
+							</apex:column>
+							<apex:column >
+								<apex:facet name="header">Description</apex:facet>
+								<apex:facet name="footer"></apex:facet>
+								<apex:outputText value="{!prod.Description}" />
+							</apex:column>
+						</apex:dataTable>
+						<br />
+						<apex:outputPanel rendered="{!if(ProductListByKeyword.size>0,true,false)}">
+							<a href="javascript:void(0);" class="tsc_buttons2 grey"
+								onclick="app.blockObj().fadeIn(500);app.searchPadObj().slideUp('slow');addAdditionalProduct();">Add
+								Product</a>
+						</apex:outputPanel>
+						<br />
+					</apex:outputPanel>
+				</div>
+			</div>
+			<apex:outputPanel id="bundlesPanel"
+				rendered="{!if(stage==1,true,false)}">
+				<apex:pageBlockSection title="Step 1 - Select packages" columns="1"
+					id="step1Section">
+					<apex:selectRadio onclick="app.blockObj().fadeIn(500);displayDetails();"
+						value="{!packageClass}">
+						<apex:selectOptions value="{!ProductClassifications}" />
+					</apex:selectRadio>
+					<apex:pageBlockTable value="{!BundleList}" var="item"
+						id="theBundleList" rendered="{!if(packageClass=='',false,true)}">
+						<apex:column >
+							<input type="checkbox" name="{!item.sfdcId}"
+								value="{!item.sfdcId}" />
+						</apex:column>
+						<apex:column headerValue="Product Name">
+						<a href="/{!item.sfdcId}" class="tooltip" rel="{!item.productDesc}" target="_blank">{!item.productName}</a>
+						</apex:column>
+						<apex:column headerValue="Product Code">
+						<a href="/{!item.sfdcId}" class="tooltip" rel="{!item.productDesc}" target="_blank">{!item.productCode}</a>
+						</apex:column>
+					</apex:pageBlockTable>
+				</apex:pageBlockSection>
+			</apex:outputPanel>
+			<apex:pageBlockSection title="Step 2 - Modify the details - {!packageClass}" columns="1"
+				rendered="{!if(stage==2,true,false)}">
+				<apex:outputPanel rendered="{!if(stage==2,true,false)}">
+					<div class="tsc_pricingtable03 tsc_pt3_style1"
+						id="pricingComparisonChart">
+						<div class="caption_column">
+							<ul>
+								<li class="header_row_1 align_center radius5_topleft"></li>
+								<li class="header_row_2">
+									<h2 class="caption">Choose Modules</h2>
+								</li>
+								<apex:variable value="{!1}" var="productCount" />
+								<apex:repeat value="{!ModuleList}" var="item">
+									<li
+										class="{!if(MOD(productCount, 2)==0,'row_style_2','row_style_4')}">
+										<span> <a href="/{!item.sfdcId}" class="tooltip"
+											rel="{!item.productDesc}" target="_blank">{!if(len(item.productDesc)>50,mid(item.productDesc,1,50)+'..',item.productDesc)}</a>
+											<!--{!item.quantityList.recommendedQty},
+																	 		{!item.quantityList.maxQty},
+																	 		{!item.quantityList.minQty},
+																	 		{!item.quantityList.licenseUnit}-->
+									</span>
+									</li>
+									<apex:variable var="productCount" value="{!productCount + 1}" />
+								</apex:repeat>
+								<li class="footer_row align_center">&nbsp;&nbsp;&nbsp;</li>
+							</ul>
+						</div>
+						<apex:variable var="bundleCount" value="{!1}" />
+						<apex:repeat value="{!SelectedBundleList}" var="item1" rows="7">
+							<div class="column_{!TEXT(bundleCount)}">
+								<ul>
+									<li
+										class="header_row_1 align_center{!if(bundleCount==SelectedBundleList.size,' radius5_topright','')}">
+										<h2 class="col1">{!if(len(item1.productName)>38,mid(item1.productName,1,38)+'..',item1.productName)}</h2>
+									</li>
+									<li class="header_row_2 align_center">
+										<h1 class="col1">
+											<input type="hidden" id="{!item1.sfdcId}-column"
+												value="{!bundleCount}" /> $<span id="{!item1.sfdcId}">{!ROUND(item1.price,0)}</span>
+										</h1>
+									</li>
+									<apex:variable var="bundleModuleCount" value="{!1}" />
+									<apex:repeat value="{!item1.getFullProductList}" var="item2">
+										<li
+											class="{!if(MOD(bundleCount,2)==0,if(MOD(bundleModuleCount, 2)==0,'row_style_2 align_center','row_style_4 align_center'),if(MOD(bundleModuleCount, 2)==0,'row_style_1 align_center','row_style_3 align_center'))}">
+											<span> <apex:outputPanel rendered="{!item2.isIncluded}">
+													<img
+														src="{!URLFOR($Resource.mincludes, 'includes/img/bullet_tick.png')}" />
+												</apex:outputPanel> <apex:outputPanel rendered="{!NOT(item2.isIncluded)}">
+													<input type="checkbox" onchange="pricingCounter(this);"
+														name="{!item1.sfdcId}-{!item2.sfdcId}"
+														value="{!TEXT(item2.price)}" />
+												</apex:outputPanel>
+										</span>
+										</li>
+										<apex:variable var="bundleModuleCount"
+											value="{!bundleModuleCount+1}" />
+									</apex:repeat>
+									<li class="footer_row align_center"><a
+										href="javascript:void(0);"
+										onclick="app.blockObj().fadeIn(500);selectBundle('{!item1.sfdcId}');"
+										class="tsc_buttons2 grey">select</a></li>
+								</ul>
+							</div>
+							<apex:variable var="bundleCount" value="{!bundleCount+1}" />
+						</apex:repeat>
+					</div>
+					<div class="tsc_clear">&nbsp;</div>
+				</apex:outputPanel>
+			</apex:pageBlockSection>
+			<apex:pageBlockSection title="Step 3 - Checkout Selected Package/Module" columns="1"
+				id="step3Section" rendered="{!if(stage==3,true,false)}">
+				<apex:outputPanel rendered="{!if(stage==3,true,false)}"
+					id="shoppingCart">
+					<script>app.hidePackageContent();</script>
+					<br />
+					<apex:pageBlockTable value="{!CheckoutBundleList}" var="item"
+						rendered="{!if(CheckoutBundleList.size>0,true,false)}">
+						<apex:column headerValue=""
+							style="{!if(item.isMaxDiscountReached,'background-color:#e3f3ff;','')}">
+							<apex:outputPanel rendered="{!if(item.isPackage||item.packageType=='AddOn',true,false)}">
+								<a href="javascript:void(0);"
+									onclick="app.blockObj().fadeIn(500);removeShoppingCartItem('{!item.sfdcId}');"><span
+									class="ui-icon ui-icon-trash"></span></a>
+							</apex:outputPanel>
+						</apex:column>
+						<apex:column headerValue="Package"
+							style="{!if(item.isMaxDiscountReached,"background-color:#e3f3ff;","")}"
+							headerClass="shoppingCartHeader">
+							<ul
+								class="{!if(item.isPackage,'bulletHeader',if(item.isPackage||item.packageType=='AddOn','bulletHeaderAddOn','bulletHeaderNoPackage'))}">
+								<li class="dimensionPageHeader"
+									id="cartItemHeader-{!item.sfdcId}"><a href="javascript:void(0);" class="tooltip" rel="{!item.productDesc}">{!item.productDesc}</a> &nbsp;&nbsp;
+									<apex:outputText rendered="{!if(item.isPackage,true,false)}" value='<a href="javascript:void(0);" style="text-decoration:none;" onclick="app.togglePackageContent($j(this));">[+]</a>' escape="false" />
+									<apex:outputText value="<script>app.generateProductListOptions({!item.getFullProductListJSON},'cartItemHeader-{!item.sfdcId}');"
+										escape="false" /></li>
+							</ul>
+						</apex:column>
+						<apex:column headerValue="License Unit"
+							style="{!if(item.isMaxDiscountReached,'background-color:#e3f3ff;','')}"
+							styleClass="shoppingCartLineItem"
+							headerClass="shoppingCartHeader">
+							{!item.quantityList.licenseUnit}
+							<!-- multi-license unit
+							<apex:outputPanel rendered="{!if(item.LicenseUnitOptions.size>1,true,false)}">
+								<apex:selectList disabled="{!if(item.packageType!='AddOn'&&NOT(item.isPackage),true,false)}" onchange="app.blockObj().fadeIn(500);reCalculatePricing();" value="{!item.quantityList.licenseUnit}" multiselect="false" size="1" id="selectedProductUOM">
+						            <apex:selectOptions value="{!item.LicenseUnitOptions}"/>
+						        </apex:selectList>
+							</apex:outputPanel>
+							-->
+						</apex:column>
+						<apex:column headerValue="License Quantity"
+							styleClass="shoppingCartLineItem"
+							style="{!if(item.isMaxDiscountReached,'background-color:#e3f3ff;','')}"
+							headerClass="shoppingCartHeader">
+							<apex:outputPanel rendered="{!if(item.packageType!='AddOn',true,false)}">
+								{!if(item.qty<1,'',TEXT(item.qty))}
+							</apex:outputPanel>
+							<apex:outputPanel rendered="{!if(item.packageType=='AddOn',true,false)}">
+								<input id="{!item.sfdcId}-qty" maxlength="9"
+									value="{!if(item.qty>0,TEXT(item.qty),'')}"
+									onkeypress="return app.enterKeyReCalculating(this,event,'quantity');"
+									onblur="app.onBlurReCulculating(this,event);"
+									name="{!item.sfdcId}-qty" size="8" type="text"
+									placeHolder="Qty." />
+							</apex:outputPanel>
+						</apex:column>
+						<apex:column headerValue="List Price"
+							style="padding-right:20px;{!if(item.isMaxDiscountReached,'background-color:#e3f3ff;','')}"
+							styleClass="shoppingCartLineItemLastColumn"
+							headerClass="shoppingCartHeader">
+							<apex:outputText value="{0,number,$#,###,##0.00}" >
+								<apex:param value="{!ROUND(item.price,2)}"/>
+							</apex:outputText>
+							<!--  
+							<apex:inputText onkeypress="return app.enterKeyReCalculating(this,event,'currency');"
+									id="pricingTextBox" value="{!item.priceStr}" rendered="{!if(item.customPricing,true,false)}" />
+							-->
+							<apex:facet name="footer">
+								<div class="calculationSection">List Price Subtotal:
+									${!listPriceShoppingCartSubtotal}</div>
+								<div class="calculationSection">&nbsp;</div>
+								<div class="calculationSection">&nbsp;</div>
+								<div class="calculationSection">&nbsp;</div>
+							</apex:facet>
+						</apex:column>
+						<apex:column headerValue="Upfront Payment"
+							style="padding-right:20px;{!if(item.isMaxDiscountReached,'background-color:#e3f3ff;','')}"
+							styleClass="shoppingCartLineItemLastColumn"
+							headerClass="shoppingCartHeader">
+							<apex:outputText value="{0,number,$#,###,##0.00}" rendered="{!if(not(item.customPricing),true,false)}">
+								<apex:param value="{!ROUND(item.upfrontPayment,2)}" />
+							</apex:outputText>
+							<apex:inputText id="upfront-pricingTextBox" onkeypress="return app.enterKeyReCalculating(this,event,'currency');"
+									 value="{!item.upfrontPayment}" rendered="{!if(item.customPricing,true,false)}" />
+							<apex:facet name="footer">
+								<div class="calculationSection">List Upfront Payment:
+									${!upfrontOriginalPaymentStr}</div>
+								<div class="calculationSection">Promotion Discount
+									({!upfrontPromotionPercentageDiscount}%):
+									${!upfrontPromotionDiscount}</div>
+								<div class="calculationSection">Upfront Total:
+									${!upfrontShoppingCartSubtotal}</div>
+								<div class="calculationSection">&nbsp;</div>
+							</apex:facet>
+						</apex:column>
+						<apex:column headerValue="Recurring Payment"
+							style="padding-right:20px;{!if(item.isMaxDiscountReached,'background-color:#e3f3ff;','')}"
+							styleClass="shoppingCartLineItemLastColumn"
+							headerClass="shoppingCartHeader">
+							<apex:outputText value="{0,number,$#,###,##0.00}">
+								<apex:param value="{!ROUND(item.recurringPayment,2)}" />
+							</apex:outputText>
+							<!--  
+							<apex:inputText id="recurring-pricingTextBox" onkeypress="return app.enterKeyReCalculating(this,event,'currency');"
+									value="{!item.recurringStr}" rendered="{!if(item.customPricing,true,false)}" />
+							-->
+							<apex:facet name="footer">
+								<div class="calculationSection">List Recurring Payment:
+									${!recurringOriginalPaymentStr}</div>
+								<div class="calculationSection">Promotion Discount
+									({!recurringPromotionPercentageDiscount}%):
+									${!recurringPromotionDiscount}</div>
+								<div class="calculationSection">Total (Monthly):
+									${!recurringShoppingCartSubtotal}</div>
+								<div class="calculationSection">Total
+									({!ROUND(currentOpp.Contract_Term__c,0)} months):
+									${!recurringShoppingCartTotal}</div>
+							</apex:facet>
+						</apex:column>
+					</apex:pageBlockTable>
+					<br />
+					<!-- <div style="text-align: right;"><a href="" class="tsc_buttons2 grey">Re-Calculate</a></div>-->
+				</apex:outputPanel>
+			</apex:pageBlockSection>
+			<!-- -Adding the Promotions Panel -->
+			<apex:pageBlockSection title="Applicable Promotions" columns="1"
+				id="promoSection" rendered="{!if(stage==3,true,false)}">
+				<!-- Serialisation test by Chia -->
+				<apex:outputText escape="false" value="<script>var op={!promoListStr};" />
+				<apex:outputPanel rendered="{!if(stage==3,true,false)}">
+					<br />
+					<table class="list" border="0" cellpadding="3" cellspacing="0">
+						<apex:variable value="{!0}" var="rowCount" />
+						<apex:repeat value="{!promoList}" var="key" id="repeatPromoList" >
+							<tr class="dataRow" >
+								<td style="padding:15px 15px 15px 15px;"><a href="javascript:void(0);" onclick="app.togglePromoCategory(this);" style="text-decoration:none;">[+]</a> {!key}
+									<apex:variable value="{!1}" var="promoCount" />
+									<apex:repeat value="{!promoList[key]}" var="promoId" id="repeatPromoId">
+										<apex:repeat value="{!promoList[key][promoId]}" var="promo" id="repeatPromo">
+											{!if(promoCount==1,if(promo.Promo_Category_Lookup__r.Allow_Combining__c,'(Allow Combine)','(Cannot Combine)'),'')}
+											<apex:outputPanel rendered="{!NOT(ISBLANK(promo.Discount_Percent__c))}">
+												<ul class="promoData">
+													<li>
+														<apex:outputPanel rendered="{!if(promo.Promo_Category_Lookup__r.Allow_Multiple__c,true,false)}">
+															<input type="checkbox" name="{!promo.Promo_Category_Lookup__r.Id}-{!promo.Id}-{!if(promo.Promo_Category_Lookup__r.Allow_Combining__c,'Combine','noCombine')}-promo" value="{!promo.Id}" onchange="app.promoConfig(this);" /> 
+														</apex:outputPanel>
+														<apex:outputPanel rendered="{!if(promo.Promo_Category_Lookup__r.Allow_Multiple__c,false,true)}">
+															<input type="radio" name="{!promo.Promo_Category_Lookup__r.Id}-{!if(promo.Promo_Category_Lookup__r.Allow_Combining__c,'Combine','noCombine')}-promo" value="{!promo.Id}" onchange="app.promoConfig(this);" /> 
+														</apex:outputPanel>
+														<apex:outputText value="{0, number, ###.00}% - {!promo.name}">
+															<apex:param value="{!promo.Discount_Percent__c}"/>
+														</apex:outputText>
+													</li>
+												</ul>
+											</apex:outputPanel>
+											<apex:variable value="{!rowCount+1}" var="rowCount" />
+											<apex:variable value="{!promoCount+1}" var="promoCount" />
+										</apex:repeat>
+									</apex:repeat>
+								</td>
+							</tr>
+						</apex:repeat> 
+					</table>
+					<br />
+					<apex:outputPanel rendered="{!if(rowCount>0,true,false)}">
+						<input type="button" value=" Apply Promotion(s) "
+						onclick="app.blockObj().fadeIn(500);applyPromotion();" class="btn" />
+						<input type="button" value=" Reset "
+							onclick="app.promoConfigReset();" class="btn" />
+					</apex:outputPanel>
+				</apex:outputPanel>
+			</apex:pageBlockSection>
+			<apex:pageBlockButtons id="productConfigButtons">
+				<apex:commandButton id="btnPrevious" value=" Previous "
+					action="{!previousStep}"
+					onclick="$j('input[type=text]').each(function(){$j(this).poshytip('hide');});app.blockObj().fadeIn(500);"
+					rendered="{!if(stage<2,false,true)}" reRender="productListForm"
+					onComplete="init(); app.blockObj().fadeOut(500);app.freezeChiaPane();" />
+				<apex:commandButton id="btnAddPackage" value=" Add More Package(s) "
+					onclick="$j('input[type=text]').each(function(){$j(this).poshytip('hide');});app.blockObj().fadeIn(500);"
+					action="{!goToStep1}" rendered="{!if(stage==3,true,false)}"
+					reRender="productListForm"
+					onComplete="init(); app.blockObj().fadeOut(500);" />
+				<apex:outputPanel rendered="{!if(stage==1,true,false)}">
+					<input type="button" value=" Add Module(s) "
+						onclick="animatingSearchPanelInStep1();" class="btn"
+						id="addModuleBtnStep1" />
+				</apex:outputPanel>
+				<apex:outputPanel rendered="{!if(stage==3,true,false)}">
+					<input type="button" value=" Add Module(s) "
+						onclick="animatingSearchPanelInStep3();" class="btn"
+						id="addModuleBtnStep3" />
+				</apex:outputPanel>
+				<apex:commandButton id="btnNext"
+					value="{!if(stage==3,' Complete Order Configuration ',' Next ')}"
+					action="{!nextStep}"
+					rendered="{!if((packageClass<>''&&stage>0)||stage==3,true,false)}"
+					onclick="app.blockObj().fadeIn(500);" reRender="productListForm"
+					onComplete="init(); app.blockObj().fadeOut(500); app.freezeChiaPane(); " />
+				<apex:commandButton id="btnCancel" value=" Cancel "
+					action="{!URLFOR($Action.Opportunity.view, currentOpp.Id)}"
+					onclick="app.blockObj().fadeIn(500);"
+					rendered="{!if(stage>0,true,false)}" />
+				<!--  <input type="button" value=" NetSuite Sales Order:Panel " onclick="app.netSuiteIntegrationPoC();" class="btn" id="nsPoCPanelInvoke"/>-->
+			</apex:pageBlockButtons>
+		</apex:pageBlock>
+		<div id="streamingMsg"></div>
+		<div id="mTradeMark" style="text-align: right;"></div>
+		<br />
+		<br />
+		<br />
+	</apex:form>
+</apex:page>
